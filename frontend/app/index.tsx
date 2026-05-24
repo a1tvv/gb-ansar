@@ -26,6 +26,14 @@ export default function HomeScreen() {
     },
     {
       id: '2',
+      title: 'Сканер штрихкода',
+      subtitle: 'Отсканируйте штрихкод',
+      icon: 'barcode' as const,
+      color: ['#fa709a', '#fee140'],
+      route: '/barcode-scanner',
+    },
+    {
+      id: '3',
       title: 'Каталог товаров',
       subtitle: 'Просмотр всех товаров',
       icon: 'grid' as const,
@@ -33,7 +41,7 @@ export default function HomeScreen() {
       route: '/catalog',
     },
     {
-      id: '3',
+      id: '4',
       title: 'Добавить товар',
       subtitle: 'Новый товар в каталог',
       icon: 'add-circle' as const,
@@ -57,6 +65,7 @@ export default function HomeScreen() {
               key={item.id}
               activeOpacity={0.9}
               onPress={() => router.push(item.route as any)}
+              testID={`menu-${item.id}`}
             >
               <LinearGradient
                 colors={item.color}
@@ -65,7 +74,7 @@ export default function HomeScreen() {
                 style={styles.card}
               >
                 <View style={styles.cardIcon}>
-                  <Ionicons name={item.icon} size={40} color="white" />
+                  <Ionicons name={item.icon} size={36} color="white" />
                 </View>
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
@@ -75,7 +84,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Версия 1.0.0</Text>
+          <Text style={styles.footerText}>Версия 2.0.0 • AI Vision + OCR</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -93,8 +102,8 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 40,
-    paddingBottom: 32,
+    paddingTop: 32,
+    paddingBottom: 24,
   },
   title: {
     fontSize: 36,
@@ -113,7 +122,7 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 24,
     padding: 24,
-    minHeight: 160,
+    minHeight: 140,
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: {
@@ -128,7 +137,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 4,
@@ -138,7 +147,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.9)',
   },
   footer: {
-    marginTop: 40,
+    marginTop: 32,
     alignItems: 'center',
   },
   footerText: {
