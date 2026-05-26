@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   StatusBar,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +15,53 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (typeof window === 'undefined') return;
+
+    // Check if already installed (standalone mode)
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    if (isStandalone) {
+      setIsInstalled(true);
+      return;
+    }
+
+    // Check if install prompt is already available
+    if ((window as any).deferredPWAPrompt) {
+      setShowInstallBanner(true);
+    }
+
+    const onInstallable = () => setShowInstallBanner(true);
+    const onInstalled = () => {
+      setShowInstallBanner(false);
+      setIsInstalled(true);
+    };
+
+    window.addEventListener('pwa-installable', onInstallable);
+    window.addEventListener('pwa-installed', onInstalled);
+
+    return () => {
+      window.removeEventListener('pwa-installable', onInstallable);
+      window.removeEventListener('pwa-installed', onInstalled);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const prompt = (window as any).deferredPWAPrompt;
+    if (!prompt) return;
+    prompt.prompt();
+    const choice = await prompt.userChoice;
+    if (choice.outcome === 'accepted') {
+      setShowInstallBanner(false);
+    }
+    (window as any).deferredPWAPrompt = null;
+  };
 
   const menuItems = [
     {
@@ -59,6 +107,26 @@ export default function HomeScreen() {
           <Text style={styles.subtitle}>Умный поиск товаров</Text>
         </View>
 
+        {showInstallBanner && Platform.OS === 'web' && (
+          <TouchableOpacity
+            style={styles.installBanner}
+            onPress={handleInstall}
+            activeOpacity={0.9}
+            testID="install-pwa-btn"
+          >
+            <View style={styles.installIcon}>
+              <Ionicons name="download" size={24} color="#667eea" />
+            </View>
+            <View style={styles.installContent}>
+              <Text style={styles.installTitle}>Установить приложение</Text>
+              <Text style={styles.installSubtitle}>
+                Добавьте на главный экран для быстрого доступа
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#667eea" />
+          </TouchableOpacity>
+        )}
+
         <View style={styles.cardsContainer}>
           {menuItems.map((item) => (
             <TouchableOpacity
@@ -84,7 +152,13 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Версия 2.0.0 • AI Vision + OCR</Text>
+          {isInstalled ? (
+            <Text style={styles.footerText}>
+              ✓ Установлено как приложение • v2.0.0
+            </Text>
+          ) : (
+            <Text style={styles.footerText}>Версия 2.0.0 • AI Vision + OCR</Text>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -103,7 +177,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 24,
     paddingTop: 32,
-    paddingBottom: 24,
+    paddingBottom: 16,
   },
   title: {
     fontSize: 36,
@@ -113,6 +187,39 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 18,
+    color: '#6c757d',
+  },
+  installBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    marginHorizontal: 24,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#667eea',
+    gap: 12,
+  },
+  installIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#667eea15',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  installContent: {
+    flex: 1,
+  },
+  installTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  installSubtitle: {
+    fontSize: 12,
     color: '#6c757d',
   },
   cardsContainer: {
