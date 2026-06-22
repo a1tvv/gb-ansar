@@ -5,3 +5,5 @@ google-generativeai
 python-dotenv
 python-multipart
 motor
+grpcio
+protobuf
