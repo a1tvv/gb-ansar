@@ -90,7 +90,7 @@ async def call_openrouter(messages: list) -> str:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemini-2.0-flash-exp:free",
+                "model": "google/gemini-2.5-flash:free",
                 "messages": messages
             }
         )
