@@ -136,7 +136,7 @@ export default function HomeScreen() {
               testID={`menu-${item.id}`}
             >
               <LinearGradient
-                colors={item.color}
+                colors={item.color as any}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.card}
