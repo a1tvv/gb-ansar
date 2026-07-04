@@ -90,8 +90,7 @@ async def call_openrouter(messages: list) -> str:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "nvidia/nemotron-3-nano-omni:free",
-                # "model": "google/gemma-4-31b-it:free",
+                "model": "google/gemma-4-31b-it:free",
                 "messages": messages
             }
         )
