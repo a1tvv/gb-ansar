@@ -80,22 +80,27 @@ class SearchResponse(BaseModel):
 
 # ============= AI Functions =============
 
-async def call_openrouter(messages: list) -> str:
+import asyncio # Добавь в импорты сверху
+
+async def call_openrouter(messages: list, retries=3) -> str:
     api_key = os.environ.get('OPENROUTER_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "google/gemma-4-31b-it:free",
-                "messages": messages
-            }
-        )
-        result = response.json()
-        return result['choices'][0]['message']['content'].strip()
+        for i in range(retries):
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "google/gemini-2.0-flash-exp:free", "messages": messages}
+            )
+            if response.status_code == 200:
+                return response.json()['choices'][0]['message']['content'].strip()
+            elif response.status_code == 429:
+                wait_time = 2 ** (i + 1) # Экспоненциальная задержка: 2, 4, 8 секунд
+                await asyncio.sleep(wait_time)
+                continue
+            else:
+                logging.error(f"API Error: {response.status_code} - {response.text}")
+                return ""
+        return ""
 
 
 async def extract_product_features(image_base64: str) -> str:
