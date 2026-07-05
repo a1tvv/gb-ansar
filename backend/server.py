@@ -80,11 +80,11 @@ class SearchResponse(BaseModel):
 
 # ============= AI Functions =============
 
-import asyncio # Добавь в импорты сверху
+import asyncio
 
 async def call_openrouter(messages: list, retries=3) -> str:
     api_key = os.environ.get('OPENROUTER_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         for i in range(retries):
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -94,14 +94,54 @@ async def call_openrouter(messages: list, retries=3) -> str:
             if response.status_code == 200:
                 return response.json()['choices'][0]['message']['content'].strip()
             elif response.status_code == 429:
-                wait_time = 2 ** (i + 1) # Экспоненциальная задержка: 2, 4, 8 секунд
-                await asyncio.sleep(wait_time)
-                continue
+                await asyncio.sleep(2 ** (i + 1))
             else:
                 logging.error(f"API Error: {response.status_code} - {response.text}")
                 return ""
-        return ""
+    return ""
 
+
+async def find_matching_product(query_image_base64: str, all_products: List[Product]) -> tuple:
+    try:
+        if not all_products:
+            return None, "No products in database"
+
+        product_catalog = "\n".join([
+            f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") + (f" | barcode:{p.barcode}" if p.barcode else "")
+            for i, p in enumerate(all_products)
+        ])
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"""Look at this product image and find the best match from the catalog below.
+
+CATALOG:
+{product_catalog}
+
+Reply with ONLY the product number (e.g. "3"), or "0" if no match."""
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{query_image_base64}"}
+                }
+            ]
+        }]
+
+        result = await call_openrouter(messages)
+        match = re.search(r'\d+', result)
+        if match:
+            match_index = int(match.group()) - 1
+            if 0 <= match_index < len(all_products):
+                return all_products[match_index], result
+
+        return None, result
+
+    except Exception as e:
+        logging.error(f"Error in matching: {str(e)}")
+        return None, str(e)
 
 async def extract_product_features(image_base64: str) -> str:
     try:
