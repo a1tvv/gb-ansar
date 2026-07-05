@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import httpx
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -15,18 +16,14 @@ import re
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
-
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-
-# ============= Models =============
 
 class Category(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -78,15 +75,11 @@ class SearchResponse(BaseModel):
     ai_analysis: Optional[str] = None
 
 
-# ============= AI Functions =============
-
-import asyncio
-
 async def call_openrouter(messages: list, retries=3) -> str:
     api_key = os.environ.get('OPENROUTER_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as http_client:
         for i in range(retries):
-            response = await client.post(
+            response = await http_client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"model": "google/gemma-4-31b-it:free", "messages": messages}
@@ -143,101 +136,21 @@ Reply with ONLY the product number (e.g. "3"), or "0" if no match."""
         logging.error(f"Error in matching: {str(e)}")
         return None, str(e)
 
+
 async def extract_product_features(image_base64: str) -> str:
     try:
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": """Analyze ONLY the product in this image (ignore background).
-Extract:
-1. PRODUCT TYPE
-2. BRAND/LOGO
-3. TEXT ON PACKAGING
-4. COLORS of the product
-5. SHAPE
-6. BARCODE numbers if visible
-7. UNIQUE FEATURES
-Be concise. Focus ONLY on the product."""
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
-                    }
-                ]
-            }
-        ]
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this product briefly: type, brand, color, shape."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+            ]
+        }]
         return await call_openrouter(messages)
     except Exception as e:
         logging.error(f"Error extracting features: {str(e)}")
         return ""
 
-
-async def find_matching_product(query_image_base64: str, all_products: List[Product]) -> tuple:
-    try:
-        if not all_products:
-            return None, "No products in database"
-
-        query_features = await extract_product_features(query_image_base64)
-        if not query_features:
-            return None, "Could not analyze image"
-
-        product_catalog = []
-        for i, p in enumerate(all_products):
-            entry = f"#{i+1} - Name: {p.name}"
-            if p.category:
-                entry += f" | Category: {p.category}"
-            if p.barcode:
-                entry += f" | Barcode: {p.barcode}"
-            if p.ai_features:
-                entry += f"\n   Features: {p.ai_features}"
-            product_catalog.append(entry)
-
-        catalog_text = "\n\n".join(product_catalog)
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"""Find the BEST matching product for the image.
-
-EXTRACTED FEATURES:
-{query_features}
-
-PRODUCT CATALOG:
-{catalog_text}
-
-If confident match found, respond with ONLY the product number (e.g. "3").
-If no match, respond with "0".
-Respond with ONLY a single number."""
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{query_image_base64}"}
-                    }
-                ]
-            }
-        ]
-
-        result = await call_openrouter(messages)
-        match = re.search(r'\d+', result)
-        if match:
-            match_index = int(match.group()) - 1
-            if 0 <= match_index < len(all_products):
-                return all_products[match_index], query_features
-
-        return None, query_features
-
-    except Exception as e:
-        logging.error(f"Error in matching: {str(e)}")
-        return None, str(e)
-
-
-# ============= Helper Functions =============
 
 def product_doc_to_model(doc: dict) -> dict:
     if 'image_base64' in doc and 'images' not in doc:
@@ -247,8 +160,6 @@ def product_doc_to_model(doc: dict) -> dict:
         del doc['_id']
     return doc
 
-
-# ============= Category Routes =============
 
 @api_router.get("/categories", response_model=List[Category])
 async def get_categories():
@@ -262,14 +173,9 @@ async def create_category(category: Category):
     return category
 
 
-# ============= Product Routes =============
-
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
     product = Product(**product_data.dict())
-    if product.images:
-        ai_features = await extract_product_features(product.images[0])
-        product.ai_features = ai_features
     await db.products.insert_one(product.dict())
     return product
 
@@ -305,15 +211,12 @@ async def search_by_photo(request: PhotoSearchRequest):
         all_products_docs = await db.products.find().to_list(1000)
         if not all_products_docs:
             return SearchResponse(products=[], confidence="no_products")
-
         products_list = [Product(**product_doc_to_model(p)) for p in all_products_docs]
         matched_product, ai_analysis = await find_matching_product(request.image_base64, products_list)
-
         if matched_product:
             return SearchResponse(products=[matched_product], confidence="high", ai_analysis=ai_analysis)
         else:
             return SearchResponse(products=[], confidence="no_match", ai_analysis=ai_analysis)
-
     except Exception as e:
         logging.error(f"Error in photo search: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -332,14 +235,8 @@ async def update_product(product_id: str, product_data: ProductUpdate):
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-
     update_data = {k: v for k, v in product_data.dict().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc)
-
-    if 'images' in update_data and update_data['images']:
-        ai_features = await extract_product_features(update_data['images'][0])
-        update_data['ai_features'] = ai_features
-
     await db.products.update_one({"id": product_id}, {"$set": update_data})
     updated_product = await db.products.find_one({"id": product_id})
     return Product(**product_doc_to_model(updated_product))
@@ -355,10 +252,12 @@ async def delete_product(product_id: str):
 
 @api_router.get("/")
 async def root():
-    return {
-        "message": "Smart AI Product Catalog API",
-        "version": "2.0.0",
-    }
+    return {"message": "Smart AI Product Catalog API", "version": "2.0.0"}
+
+
+@app.get("/")
+async def health():
+    return {"status": "ok"}
 
 
 app.include_router(api_router)
@@ -378,7 +277,3 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
-@app.get("/")
-async def health():
-    return {"status": "ok"}
