@@ -102,7 +102,7 @@ async def call_openrouter(messages: list, retries=3) -> str:
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "google/gemma-4-31b-it:free",
+                    "model": "nvidia/nemotron-nano-2-vl:free",
                     "messages": messages  # <--- ВОТ ЭТО ДОЛЖНО БЫТЬ ОБЯЗАТЕЛЬНО
                 }
             )
@@ -129,18 +129,20 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
             for i, p in enumerate(all_products)
         ])
 
-        messages = [{
+       messages = [{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": f"""Look at this product image and find the best match from the catalog below.
+                    "text": f"""You are a precise search agent. 
+Catalog:
+{product_catalog}
 
 Rules:
-1. Compare the visual features (shape, brand, text, color).
-2. If you find a clear match, reply ONLY with the product number (e.g. "3").
-3. If you are unsure or the image is too blurry/dark, reply ONLY "0".
-4. Do not include any other text."""
+1. Compare the image with the catalog.
+2. Return ONLY the number (e.g., 1, 2, 3) if a match exists.
+3. If no match is found or the image is unclear, return ONLY 0.
+4. DO NOT write words, sentences, or explanations. Just a single digit."""
                 },
                 {
                     "type": "image_url",
