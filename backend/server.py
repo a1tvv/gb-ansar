@@ -99,10 +99,10 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
         if not all_products:
             return None, "No products in database"
 
-        if "," in query_image_base64:
-            query_image_base64 = query_image_base64.split(",")[1]
-
         product_catalog = "\n".join([
+            f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") + (f" | barcode:{p.barcode}" if p.barcode else "")
+            for i, p in enumerate(all_products)
+        ])
 
         messages = [{
             "role": "user",
