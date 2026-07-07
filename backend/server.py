@@ -21,8 +21,16 @@ db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
-app = FastAPI()
-api_router = APIRouter(prefix="/api")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Код запуска (если нужно)
+    yield
+    # Код выключения
+    client.close()
+
+app = FastAPI(lifespan=lifespan)
 
 
 class Category(BaseModel):
@@ -114,10 +122,11 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
                     "type": "text",
                     "text": f"""Look at this product image and find the best match from the catalog below.
 
-CATALOG:
-{product_catalog}
-
-Reply with ONLY the product number (e.g. "3"), or "0" if no match."""
+Rules:
+1. Compare the visual features (shape, brand, text, color).
+2. If you find a clear match, reply ONLY with the product number (e.g. "3").
+3. If you are unsure or the image is too blurry/dark, reply ONLY "0".
+4. Do not include any other text."""
                 },
                 {
                     "type": "image_url",
