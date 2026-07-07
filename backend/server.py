@@ -121,15 +121,22 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
         if not all_products:
             return None, "No products in database"
 
-        if "," in query_image_base64:
+       if "," in query_image_base64:
             query_image_base64 = query_image_base64.split(",")[1]
 
+        # ВОТ ЭТА СТРОКА ДОЛЖНА БЫТЬ ОБЯЗАТЕЛЬНО:
+        product_catalog = "\n".join([
+            f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") 
+            for i, p in enumerate(all_products)
+        ])
+
+        # А теперь уже используем product_catalog:
         messages = [{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": f"Compare image to products:\n{product_catalog}\nReturn ONLY number or 0."
+                    "text": f"Catalog:\n{product_catalog}\n\nTask: Compare image to products. Return ONLY number (1, 2...) or 0."
                 },
                 {
                     "type": "image_url",
