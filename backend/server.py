@@ -102,7 +102,7 @@ async def call_openrouter(messages: list, retries=3) -> str:
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+                    "model": "google/gemma-4-31b-it:free",
                     "messages": messages  # <--- ВОТ ЭТО ДОЛЖНО БЫТЬ ОБЯЗАТЕЛЬНО
                 }
             )
