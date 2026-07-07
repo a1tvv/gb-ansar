@@ -49,7 +49,6 @@ class Category(BaseModel):
     name: str
     subcategories: List[str] = []
 
-
 class Product(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -63,7 +62,6 @@ class Product(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-
 class ProductCreate(BaseModel):
     name: str
     price: float
@@ -72,7 +70,6 @@ class ProductCreate(BaseModel):
     subcategory: Optional[str] = None
     barcode: Optional[str] = None
     article_number: Optional[str] = None
-
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -83,10 +80,8 @@ class ProductUpdate(BaseModel):
     barcode: Optional[str] = None
     article_number: Optional[str] = None
 
-
 class PhotoSearchRequest(BaseModel):
     image_base64: str
-
 
 class SearchResponse(BaseModel):
     products: List[Product]
@@ -103,7 +98,7 @@ async def call_openrouter(messages: list, retries=3) -> str:
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
                     "model": "nvidia/nemotron-nano-2-vl:free",
-                    "messages": messages  # <--- ВОТ ЭТО ДОЛЖНО БЫТЬ ОБЯЗАТЕЛЬНО
+                    "messages": messages
                 }
             )
             if response.status_code == 200:
@@ -115,31 +110,35 @@ async def call_openrouter(messages: list, retries=3) -> str:
                 return ""
     return ""
 
-
 async def find_matching_product(query_image_base64: str, all_products: List[Product]) -> tuple:
     try:
         if not all_products:
             return None, "No products in database"
 
         if "," in query_image_base64:
-                query_image_base64 = query_image_base64.split(",")[1]
+            query_image_base64 = query_image_base64.split(",")[1]
 
-            # ВОТ ЭТА СТРОКА ДОЛЖНА БЫТЬ ОБЯЗАТЕЛЬНО:
-                product_catalog = "\n".join([
-                    f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") 
-                    for i, p in enumerate(all_products)
-                ])
+        product_catalog = "\n".join([
+            f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") 
+            for i, p in enumerate(all_products)
+        ])
 
-        # А теперь уже используем product_catalog:
+        # === ДОБАВЛЕН ТОТ САМЫЙ ПРОМПТ ДЛЯ РОБАСТНОСТИ ===
+        system_prompt = (
+            "Ты — складской сканер высокой точности. Твоя задача — извлекать сущности из изображений "
+            "даже при плохом освещении, бликах и шумах. Не отказывайся от ответа, если картинка не идеальна — "
+            "делай вероятностный прогноз на основе имеющихся данных."
+        )
+
         messages = [{
             "role": "user",
             "content": [
                 {
-                    "type": "text",
-                    "text": f"Catalog:\n{product_catalog}\n\nTask: Compare image to products. Return ONLY number (1, 2...) or 0."
+                    "type": "text", 
+                    "text": f"{system_prompt}\n\nCatalog:\n{product_catalog}\n\nTask: Compare image to products. Return ONLY number (1, 2...) or 0."
                 },
                 {
-                    "type": "image_url",
+                    "type": "image_url", 
                     "image_url": {"url": f"data:image/jpeg;base64,{query_image_base64}"}
                 }
             ]
@@ -156,10 +155,9 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
                 
         return None, result
 
-    except Exception as e: # <-- ЭТОТ БЛОК ДОЛЖЕН БЫТЬ ОБЯЗАТЕЛЬНО
+    except Exception as e:
         logging.error(f"Error in matching: {str(e)}")
         return None, str(e)
-
 
 async def extract_product_features(image_base64: str) -> str:
     try:
@@ -175,7 +173,6 @@ async def extract_product_features(image_base64: str) -> str:
         logging.error(f"Error extracting features: {str(e)}")
         return ""
 
-
 def product_doc_to_model(doc: dict) -> dict:
     if 'image_base64' in doc and 'images' not in doc:
         doc['images'] = [doc['image_base64']] if doc['image_base64'] else []
@@ -184,25 +181,21 @@ def product_doc_to_model(doc: dict) -> dict:
         del doc['_id']
     return doc
 
-
 @api_router.get("/categories", response_model=List[Category])
 async def get_categories():
     categories = await db.categories.find().to_list(1000)
     return [Category(**{k: v for k, v in c.items() if k != '_id'}) for c in categories] if categories else []
-
 
 @api_router.post("/categories", response_model=Category)
 async def create_category(category: Category):
     await db.categories.insert_one(category.dict())
     return category
 
-
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
     product = Product(**product_data.dict())
     await db.products.insert_one(product.dict())
     return product
-
 
 @api_router.get("/products", response_model=List[Product])
 async def get_products(category: Optional[str] = None, subcategory: Optional[str] = None):
@@ -214,12 +207,10 @@ async def get_products(category: Optional[str] = None, subcategory: Optional[str
     products = await db.products.find(query).to_list(1000)
     return [Product(**product_doc_to_model(p)) for p in products]
 
-
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
     products = await db.products.find({"name": {"$regex": q, "$options": "i"}}).to_list(1000)
     return [Product(**product_doc_to_model(p)) for p in products]
-
 
 @api_router.get("/products/search/barcode", response_model=Product)
 async def search_by_barcode(barcode: str):
@@ -227,7 +218,6 @@ async def search_by_barcode(barcode: str):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product_doc_to_model(product))
-
 
 @api_router.post("/products/search/photo", response_model=SearchResponse)
 async def search_by_photo(request: PhotoSearchRequest):
@@ -245,14 +235,12 @@ async def search_by_photo(request: PhotoSearchRequest):
         logging.error(f"Error in photo search: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str):
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product_doc_to_model(product))
-
 
 @api_router.put("/products/{product_id}", response_model=Product)
 async def update_product(product_id: str, product_data: ProductUpdate):
@@ -265,7 +253,6 @@ async def update_product(product_id: str, product_data: ProductUpdate):
     updated_product = await db.products.find_one({"id": product_id})
     return Product(**product_doc_to_model(updated_product))
 
-
 @api_router.delete("/products/{product_id}")
 async def delete_product(product_id: str):
     result = await db.products.delete_one({"id": product_id})
@@ -273,35 +260,12 @@ async def delete_product(product_id: str):
         raise HTTPException(status_code=404, detail="Product not found")
     return {"message": "Product deleted successfully"}
 
-
 @api_router.get("/")
 async def root():
     return {"message": "Smart AI Product Catalog API", "version": "2.0.0"}
 
-
-@app.get("/")
+@app.get("/health")
 async def health():
     return {"status": "ok"}
 
-
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-
-@app.get("/")
-async def health(): return {"status": "ok"}
 app.include_router(api_router)
