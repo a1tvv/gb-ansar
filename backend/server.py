@@ -126,14 +126,21 @@ Reply with ONLY the product number (e.g. "3"), or "0" if no match."""
             ]
         }]
 
-        result = await call_openrouter(messages)
-        match = re.search(r'\d+', result)
-        if match:
-            match_index = int(match.group()) - 1
-            if 0 <= match_index < len(all_products):
-                return all_products[match_index], result
-
-        return None, result
+       result = await call_openrouter(messages)
+    
+    # ДОБАВЬ ЭТОТ ЛОГ, ЧТОБЫ ВИДЕТЬ, ЧТО ОТВЕЧАЕТ НЕЙРОСЕТЬ
+    logging.info(f"AI raw response: {result}") 
+    
+    match = re.search(r'\d+', result)
+    if match:
+        match_index = int(match.group()) - 1
+        logging.info(f"AI matched index: {match_index}") # Лог индекса
+        
+        if 0 <= match_index < len(all_products):
+            return all_products[match_index], result
+            
+    logging.warning("AI could not find a valid match index") # Лог ошибки
+    return None, result
 
     except Exception as e:
         logging.error(f"Error in matching: {str(e)}")
