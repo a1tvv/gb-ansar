@@ -124,25 +124,13 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
         if "," in query_image_base64:
             query_image_base64 = query_image_base64.split(",")[1]
 
-        product_catalog = "\n".join([
-            f"#{i+1} - {p.name}" + (f" | {p.category}" if p.category else "") + (f" | barcode:{p.barcode}" if p.barcode else "")
-            for i, p in enumerate(all_products)
-        ])
-
-       messages = [{
+        # Вот здесь должно быть ровно 8 пробелов от начала строки:
+        messages = [{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": f"""You are a precise search agent. 
-Catalog:
-{product_catalog}
-
-Rules:
-1. Compare the image with the catalog.
-2. Return ONLY the number (e.g., 1, 2, 3) if a match exists.
-3. If no match is found or the image is unclear, return ONLY 0.
-4. DO NOT write words, sentences, or explanations. Just a single digit."""
+                    "text": f"""..."""
                 },
                 {
                     "type": "image_url",
@@ -150,26 +138,7 @@ Rules:
                 }
             ]
         }]
-
-        result = await call_openrouter(messages)
-        
-        # Логирование ответа нейросети
-        logging.info(f"AI raw response: {result}") 
-        
-        match = re.search(r'\d+', result)
-        if match:
-            match_index = int(match.group()) - 1
-            logging.info(f"AI matched index: {match_index}")
-            
-            if 0 <= match_index < len(all_products):
-                return all_products[match_index], result
-                
-        logging.warning("AI could not find a valid match index")
-        return None, result
-
-    except Exception as e:
-        logging.error(f"Error in matching: {str(e)}")
-        return None, str(e)
+        # Весь код ниже тоже должен быть выровнен по 8 пробелов
 
 
 async def extract_product_features(image_base64: str) -> str:
