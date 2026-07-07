@@ -21,6 +21,9 @@ db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
+app = FastAPI(lifespan=lifespan)
+api_router = APIRouter(prefix="/api")
+
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
