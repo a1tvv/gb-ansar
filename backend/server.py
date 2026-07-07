@@ -101,7 +101,10 @@ async def call_openrouter(messages: list, retries=3) -> str:
             response = await http_client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "nvidia/nemotron-3-ultra-550b-a55b:free",}
+                json={
+                    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+                    "messages": messages  # <--- ВОТ ЭТО ДОЛЖНО БЫТЬ ОБЯЗАТЕЛЬНО
+                }
             )
             if response.status_code == 200:
                 return response.json()['choices'][0]['message']['content'].strip()
