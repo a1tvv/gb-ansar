@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
 import os
 import logging
 import httpx
@@ -21,19 +22,26 @@ db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
-app = FastAPI(lifespan=lifespan)
-api_router = APIRouter(prefix="/api")
-
-from contextlib import asynccontextmanager
-
+# Жизненный цикл (открытие/закрытие БД)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Код запуска (если нужно)
     yield
-    # Код выключения
     client.close()
 
 app = FastAPI(lifespan=lifespan)
+api_router = APIRouter(prefix="/api")
+
+# Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class Category(BaseModel):
@@ -299,3 +307,7 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+@app.get("/")
+async def health(): return {"status": "ok"}
+app.include_router(api_router)
