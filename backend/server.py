@@ -124,13 +124,12 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
         if "," in query_image_base64:
             query_image_base64 = query_image_base64.split(",")[1]
 
-        # Вот здесь должно быть ровно 8 пробелов от начала строки:
         messages = [{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": f"""..."""
+                    "text": f"Compare image to products:\n{product_catalog}\nReturn ONLY number or 0."
                 },
                 {
                     "type": "image_url",
@@ -138,7 +137,21 @@ async def find_matching_product(query_image_base64: str, all_products: List[Prod
                 }
             ]
         }]
-        # Весь код ниже тоже должен быть выровнен по 8 пробелов
+
+        result = await call_openrouter(messages)
+        logging.info(f"AI raw response: {result}") 
+        
+        match = re.search(r'\d+', result)
+        if match:
+            match_index = int(match.group()) - 1
+            if 0 <= match_index < len(all_products):
+                return all_products[match_index], result
+                
+        return None, result
+
+    except Exception as e: # <-- ЭТОТ БЛОК ДОЛЖЕН БЫТЬ ОБЯЗАТЕЛЬНО
+        logging.error(f"Error in matching: {str(e)}")
+        return None, str(e)
 
 
 async def extract_product_features(image_base64: str) -> str:
