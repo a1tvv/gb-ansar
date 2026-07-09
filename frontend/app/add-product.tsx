@@ -201,7 +201,7 @@ export default function AddProductScreen() {
             >
               {images.map((img, index) => (
                 <View key={index} style={styles.imageWrapper}>
-                  <Image
+                 <Image
                     source={{ uri: `data:image/jpeg;base64,${img}` }}
                     style={styles.imageItem}
                   />
