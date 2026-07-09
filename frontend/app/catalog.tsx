@@ -98,7 +98,7 @@ export default function CatalogScreen() {
         {mainImage ? (
          <Image
             source={{ 
-              uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
+              uri: mainImage.startsWith('http') ? mainImage : `data:image/jpeg;base64,${mainImage}`
             }}
             style={styles.productImage}
             resizeMode="cover"
