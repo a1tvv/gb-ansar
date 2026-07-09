@@ -261,14 +261,27 @@ async def create_product(product_data: ProductCreate):
     return product
 
 @api_router.get("/products", response_model=List[Product])
-async def get_products(category: Optional[str] = None, subcategory: Optional[str] = None):
+async def get_products(
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 20
+):
     query = {}
     if category:
         query["category"] = category
     if subcategory:
         query["subcategory"] = subcategory
-    products = await db.products.find(query).to_list(1000)
-    return [Product(**product_doc_to_model(p)) for p in products]
+    
+    products = await db.products.find(query).skip(skip).limit(limit).to_list(limit)
+    result = []
+    for p in products:
+        doc = product_doc_to_model(p)
+        # Отдаём только первую картинку для каталога
+        if doc.get('images') and len(doc['images']) > 1:
+            doc['images'] = [doc['images'][0]]
+        result.append(Product(**doc))
+    return result
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):

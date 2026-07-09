@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const PAGE_SIZE = 20;
 
 interface Product {
   id: string;
@@ -34,44 +35,75 @@ export default function CatalogScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [skip, setSkip] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (reset = false) => {
+    const currentSkip = reset ? 0 : skip;
+    if (!reset && (isLoadingMore || !hasMore)) return;
+
     try {
-      const response = await fetch(`${API_URL}/api/products`);
+      if (reset) {
+        setIsLoading(true);
+      } else {
+        setIsLoadingMore(true);
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/products?skip=${currentSkip}&limit=${PAGE_SIZE}`
+      );
       const data = await response.json();
-      setProducts(data);
+
+      if (reset) {
+        setProducts(data);
+        setSkip(PAGE_SIZE);
+      } else {
+        setProducts(prev => [...prev, ...data]);
+        setSkip(prev => prev + PAGE_SIZE);
+      }
+
+      setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
-      console.error('Error loading products:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить товары');
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [skip, isLoadingMore, hasMore]);
 
   useFocusEffect(
     useCallback(() => {
-      setIsLoading(true);
-      loadProducts();
-    }, [loadProducts])
+      setSkip(0);
+      setHasMore(true);
+      loadProducts(true);
+    }, [])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadProducts();
+    setSkip(0);
+    setHasMore(true);
+    loadProducts(true);
   };
 
   const searchProducts = async (query: string) => {
     if (!query.trim()) {
-      loadProducts();
+      setSkip(0);
+      setHasMore(true);
+      loadProducts(true);
       return;
     }
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_URL}/api/products/search/text?q=${encodeURIComponent(query)}`);
+      const response = await fetch(
+        `${API_URL}/api/products/search/text?q=${encodeURIComponent(query)}`
+      );
       const data = await response.json();
       setProducts(data);
+      setHasMore(false);
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось выполнить поиск');
     } finally {
@@ -86,6 +118,16 @@ export default function CatalogScreen() {
     }
   };
 
+  const renderFooter = () => {
+    if (!isLoadingMore) return null;
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator size="small" color="#667eea" />
+        <Text style={styles.footerLoaderText}>Загрузка...</Text>
+      </View>
+    );
+  };
+
   const renderProductCard = ({ item }: { item: Product }) => {
     const mainImage = item.images && item.images.length > 0 ? item.images[0] : null;
     return (
@@ -96,8 +138,8 @@ export default function CatalogScreen() {
         testID={`product-${item.id}`}
       >
         {mainImage ? (
-         <Image
-            source={{ 
+          <Image
+            source={{
               uri: mainImage.startsWith('http') ? mainImage : `data:image/jpeg;base64,${mainImage}`
             }}
             style={styles.productImage}
@@ -197,6 +239,13 @@ export default function CatalogScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
           }
+          onEndReached={() => {
+            if (!searchQuery && hasMore && !isLoadingMore) {
+              loadProducts(false);
+            }
+          }}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={renderFooter}
         />
       )}
     </SafeAreaView>
@@ -248,4 +297,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#667eea', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
   },
   addBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  footerLoader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 16, gap: 8,
+  },
+  footerLoaderText: { fontSize: 14, color: '#6c757d' },
 });
