@@ -8,3 +8,4 @@ motor
 grpcio
 protobuf
 httpx
+aioboto3
