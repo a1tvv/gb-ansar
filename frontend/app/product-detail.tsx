@@ -125,15 +125,15 @@ export default function ProductDetailScreen() {
                 onMomentumScrollEnd={onImageScroll}
               >
                 {product.images.map((img, index) => (
-                  <Image
-                    key={index}
-                    source={{ 
-                      uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
-                    }}
-                    style={styles.productImage}
-                    resizeMode="cover"
-                  />
-                ))}
+                    <Image
+                      key={index}
+                      source={{ 
+                        uri: img && img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
+                      }}
+                      style={styles.productImage}
+                      resizeMode="cover"
+                    />
+                  ))}
               </ScrollView>
               {product.images.length > 1 && (
                 <View style={styles.pagination}>
