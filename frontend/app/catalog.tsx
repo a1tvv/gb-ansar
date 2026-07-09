@@ -96,8 +96,10 @@ export default function CatalogScreen() {
         testID={`product-${item.id}`}
       >
         {mainImage ? (
-          <Image
-            source={{ uri: `data:image/jpeg;base64,${mainImage}` }}
+         <Image
+            source={{ 
+              uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
+            }}
             style={styles.productImage}
             resizeMode="cover"
           />
