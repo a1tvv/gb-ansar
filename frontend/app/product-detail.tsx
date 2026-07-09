@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +38,7 @@ export default function ProductDetailScreen() {
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
 
   const loadProduct = useCallback(async (productId: string) => {
     try {
@@ -113,6 +115,33 @@ export default function ProductDetailScreen() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* Модалка со штрихкодом */}
+      <Modal
+        visible={barcodeModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setBarcodeModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => setBarcodeModalVisible(false)}
+            >
+              <Ionicons name="close" size={28} color="#1a1a1a" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>{product.name}</Text>
+            <Text style={styles.modalSubtitle}>Поднесите сканер к экрану</Text>
+            <Image
+              source={{ uri: `https://barcodeapi.org/api/auto/${product.barcode}` }}
+              style={styles.modalBarcodeImage}
+              resizeMode="contain"
+            />
+            <Text style={styles.modalBarcodeNumber}>{product.barcode}</Text>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.imageContainer}>
@@ -200,7 +229,21 @@ export default function ProductDetailScreen() {
           {(product.barcode || product.article_number) && (
             <View style={styles.section}>
               {product.barcode && (
-                <InfoCard icon="barcode" label="Штрихкод" value={product.barcode} color="#4facfe" />
+                <TouchableOpacity onPress={() => setBarcodeModalVisible(true)} activeOpacity={0.8}>
+                  <View style={styles.barcodeCard}>
+                    <View style={[styles.iconContainer, { backgroundColor: '#4facfe20' }]}>
+                      <Ionicons name="barcode" size={24} color="#4facfe" />
+                    </View>
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Штрихкод</Text>
+                      <Text style={styles.infoValue}>{product.barcode}</Text>
+                    </View>
+                    <View style={styles.scanBadge}>
+                      <Ionicons name="scan" size={16} color="#4facfe" />
+                      <Text style={styles.scanBadgeText}>Сканировать</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
               )}
               {product.article_number && (
                 <InfoCard
@@ -210,18 +253,6 @@ export default function ProductDetailScreen() {
                   color="#43e97b"
                 />
               )}
-            </View>
-          )}
-
-          {product.barcode && (
-            <View style={styles.barcodeContainer}>
-              <Text style={styles.barcodeScanLabel}>📷 Штрихкод для сканирования</Text>
-              <Image
-                source={{ uri: `https://barcodeapi.org/api/auto/${product.barcode}` }}
-                style={styles.barcodeImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.barcodeNumber}>{product.barcode}</Text>
             </View>
           )}
 
@@ -295,6 +326,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'white', padding: 20, borderRadius: 16,
   },
+  barcodeCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'white', padding: 20, borderRadius: 16,
+    borderWidth: 2, borderColor: '#4facfe30',
+  },
   iconContainer: {
     width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center', marginRight: 16,
@@ -305,32 +341,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', fontWeight: '600',
   },
   infoValue: { fontSize: 18, fontWeight: '600', color: '#1a1a1a' },
-  barcodeContainer: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#4facfe20',
+  scanBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#4facfe15', paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 10,
   },
-  barcodeImage: {
-    width: '100%',
-    height: 100,
-    marginVertical: 12,
-  },
-  barcodeScanLabel: {
-    fontSize: 13,
-    color: '#6c757d',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  barcodeNumber: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    letterSpacing: 3,
-  },
+  scanBadgeText: { fontSize: 12, color: '#4facfe', fontWeight: '700' },
   aiSection: {
     backgroundColor: 'white', padding: 20, borderRadius: 16,
     borderWidth: 2, borderColor: '#667eea20',
@@ -340,4 +356,32 @@ const styles = StyleSheet.create({
   },
   aiTitle: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
   aiText: { fontSize: 14, color: '#495057', lineHeight: 20 },
+
+  // Модалка
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  modalContent: {
+    backgroundColor: 'white', borderRadius: 24, padding: 32,
+    width: '100%', alignItems: 'center',
+  },
+  modalClose: {
+    position: 'absolute', top: 16, right: 16,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#f8f9fa', alignItems: 'center', justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 20, fontWeight: 'bold', color: '#1a1a1a',
+    marginBottom: 4, textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14, color: '#6c757d', marginBottom: 24,
+  },
+  modalBarcodeImage: {
+    width: '100%', height: 150, marginBottom: 16,
+  },
+  modalBarcodeNumber: {
+    fontSize: 22, fontWeight: '700', color: '#1a1a1a', letterSpacing: 3,
+  },
 });
