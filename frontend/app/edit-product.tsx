@@ -234,9 +234,12 @@ export default function EditProductScreen() {
             >
               {images.map((img, index) => (
                 <View key={index} style={styles.imageWrapper}>
-                  <Image
-                    source={{ uri: `data:image/jpeg;base64,${img}` }}
-                    style={styles.imageItem}
+                 <Image
+                    source={{ 
+                      uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
+                    }}
+                    style={styles.productImage}
+                    resizeMode="cover"
                   />
                   <TouchableOpacity
                     style={styles.removeImageBtn}
