@@ -8,7 +8,6 @@ import {
   StatusBar,
   ScrollView,
   Platform,
-  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +22,7 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web') return;
     if (typeof window === 'undefined') return;
 
+    // Check if already installed (standalone mode)
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true;
@@ -31,6 +31,7 @@ export default function HomeScreen() {
       return;
     }
 
+    // Check if install prompt is already available
     if ((window as any).deferredPWAPrompt) {
       setShowInstallBanner(true);
     }
@@ -102,11 +103,8 @@ export default function HomeScreen() {
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Image
-            source={{ uri: 'https://ansar-home.ams3.cdn.digitaloceanspaces.com/main/ansarhw-logo.jpg' }}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+          <Text style={styles.title}>AI Каталог</Text>
+          <Text style={styles.subtitle}>Умный поиск товаров</Text>
         </View>
 
         {showInstallBanner && Platform.OS === 'web' && (
@@ -155,7 +153,9 @@ export default function HomeScreen() {
 
         <View style={styles.footer}>
           {isInstalled ? (
-            <Text style={styles.footerText}>✓ Установлено как приложение • v2.0.0</Text>
+            <Text style={styles.footerText}>
+              ✓ Установлено как приложение • v2.0.0
+            </Text>
           ) : (
             <Text style={styles.footerText}>Версия 2.0.0 • AI Vision + OCR</Text>
           )}
@@ -178,11 +178,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 32,
     paddingBottom: 16,
-    alignItems: 'flex-start',
   },
-  logo: {
-    width: 200,
-    height: 80,
+  title: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#6c757d',
   },
   installBanner: {
     flexDirection: 'row',
@@ -227,7 +232,10 @@ const styles = StyleSheet.create({
     minHeight: 140,
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 8,
