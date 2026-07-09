@@ -125,15 +125,15 @@ export default function ProductDetailScreen() {
                 onMomentumScrollEnd={onImageScroll}
               >
                 {product.images.map((img, index) => (
-                    <Image
-                      key={index}
-                      source={{ 
-                        uri: img && img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
-                      }}
-                      style={styles.productImage}
-                      resizeMode="cover"
-                    />
-                  ))}
+                  <Image
+                    key={index}
+                    source={{
+                      uri: img && img.startsWith('http') ? img : `data:image/jpeg;base64,${img}`
+                    }}
+                    style={styles.productImage}
+                    resizeMode="cover"
+                  />
+                ))}
               </ScrollView>
               {product.images.length > 1 && (
                 <View style={styles.pagination}>
@@ -210,6 +210,18 @@ export default function ProductDetailScreen() {
                   color="#43e97b"
                 />
               )}
+            </View>
+          )}
+
+          {product.barcode && (
+            <View style={styles.barcodeContainer}>
+              <Text style={styles.barcodeScanLabel}>📷 Штрихкод для сканирования</Text>
+              <Image
+                source={{ uri: `https://barcodeapi.org/api/auto/${product.barcode}` }}
+                style={styles.barcodeImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.barcodeNumber}>{product.barcode}</Text>
             </View>
           )}
 
@@ -293,6 +305,32 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', fontWeight: '600',
   },
   infoValue: { fontSize: 18, fontWeight: '600', color: '#1a1a1a' },
+  barcodeContainer: {
+    backgroundColor: 'white',
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#4facfe20',
+  },
+  barcodeImage: {
+    width: '100%',
+    height: 100,
+    marginVertical: 12,
+  },
+  barcodeScanLabel: {
+    fontSize: 13,
+    color: '#6c757d',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  barcodeNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    letterSpacing: 3,
+  },
   aiSection: {
     backgroundColor: 'white', padding: 20, borderRadius: 16,
     borderWidth: 2, borderColor: '#667eea20',
