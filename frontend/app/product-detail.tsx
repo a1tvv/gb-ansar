@@ -127,7 +127,9 @@ export default function ProductDetailScreen() {
                 {product.images.map((img, index) => (
                   <Image
                     key={index}
-                    source={{ uri: `data:image/jpeg;base64,${img}` }}
+                    source={{ 
+                      uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}` 
+                    }}
                     style={styles.productImage}
                     resizeMode="cover"
                   />
