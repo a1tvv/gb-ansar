@@ -13,6 +13,13 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
 import re
+import aioboto3
+import base64
+
+s3_endpoint = os.environ.get('S3_ENDPOINT_URL')
+s3_bucket = os.environ.get('S3_BUCKET_NAME')
+s3_access_key = os.environ.get('S3_ACCESS_KEY')
+s3_secret_key = os.environ.get('S3_SECRET_KEY')
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -21,6 +28,43 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
+
+async def upload_base64_to_s3(base64_data: str, folder: str = "products") -> str:
+    if not all([s3_endpoint, s3_bucket, s3_access_key, s3_secret_key]):
+        logger.error("S3 credentials are not fully set!")
+        return ""
+
+    try:
+        # Очищаем строку от префикса 'data:image/jpeg;base64,' если он есть
+        if "," in base64_data:
+            base64_data = base64_data.split(",")[1]
+            
+        image_bytes = base64.b64decode(base64_data)
+        file_name = f"{folder}/{uuid.uuid4()}.jpg"
+
+        session = aioboto3.Session()
+        async with session.client(
+            's3',
+            endpoint_url=s3_endpoint,
+            aws_access_key_id=s3_access_key,
+            aws_secret_access_key=s3_secret_key
+        ) as client:
+            await client.put_object(
+                Bucket=s3_bucket,
+                Key=file_name,
+                Body=image_bytes,
+                ContentType='image/jpeg',
+                ACL='public-read'  # Делаем файл доступным по ссылке
+            )
+
+        # Формируем публичную ссылку DigitalOcean
+        domain = s3_endpoint.replace("https://", "")
+        public_url = f"https://{s3_bucket}.{domain}/{file_name}"
+        return public_url
+
+    except Exception as e:
+        logger.error(f"Error uploading to S3: {str(e)}")
+        return ""
 
 # Жизненный цикл (открытие/закрытие БД)
 @asynccontextmanager
@@ -193,8 +237,27 @@ async def create_category(category: Category):
 
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
-    product = Product(**product_data.dict())
+    product_dict = product_data.dict()
+    uploaded_image_urls = []
+    
+    # Обрабатываем список картинок
+    for image_data in product_dict.get("images", []):
+        # Если строка длинная и похожа на base64, грузим в S3
+        if image_data.startswith("data:image") or len(image_data) > 1000:
+            url = await upload_base64_to_s3(image_data)
+            if url:
+                uploaded_image_urls.append(url)
+        else:
+            # Если это уже короткая ссылка, просто оставляем
+            uploaded_image_urls.append(image_data)
+            
+    # Подменяем массив картинок на S3 ссылки
+    product_dict["images"] = uploaded_image_urls
+    
+    # Генерируем финальную модель и сохраняем
+    product = Product(**product_dict)
     await db.products.insert_one(product.dict())
+    
     return product
 
 @api_router.get("/products", response_model=List[Product])
