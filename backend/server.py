@@ -237,7 +237,7 @@ async def create_category(category: Category):
     return category
     
 @api_router.post("/products", response_model=Product)
-async def create_product(product_data: ProductCreate
+async def create_product(product_data: ProductCreate):
     product_dict = product_data.dict()
     uploaded_image_urls = []
     
