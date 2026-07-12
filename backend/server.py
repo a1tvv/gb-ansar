@@ -235,8 +235,9 @@ async def get_categories():
 async def create_category(category: Category):
     await db.categories.insert_one(category.dict())
     return category
-
-async def create_product(product_data: ProductCreate):
+    
+@api_router.post("/products", response_model=Product)
+async def create_product(product_data: ProductCreate
     product_dict = product_data.dict()
     uploaded_image_urls = []
     
@@ -328,47 +329,45 @@ async def search_by_barcode(barcode: str):
 @api_router.post("/products/search/photo", response_model=SearchResponse)
 async def search_by_photo(request: PhotoSearchRequest):
     try:
-        # 1. Очистка картинки (если есть запятая)
         img_base64 = request.image_base64
         if "," in img_base64:
             img_base64 = img_base64.split(",")[1]
 
-        # 2. Жесткий промпт для ИИ: требуем только одно слово
         messages = [{
             "role": "user",
             "content": [
                 {
-                    "type": "text", 
+                    "type": "text",
                     "text": "Ты - система распознавания товаров. Назови главный предмет на фото ОДНИМ-ДВУМЯ СЛОВАМИ на русском языке (например: Кружка, Мочалка, Ваза). Не пиши никаких объяснений, только само название предмета."
                 },
                 {
-                    "type": "image_url", 
+                    "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
                 }
             ]
         }]
 
-        # 3. Получаем ответ от ИИ (например, "Мочалка")
         ai_keyword = await call_openrouter(messages)
         logging.info(f"AI recognized: {ai_keyword}")
-        
+
         if not ai_keyword:
             return SearchResponse(products=[], confidence="no_match", ai_analysis="Не удалось распознать ИИ")
 
-        # Очищаем ответ от лишних точек, кавычек или переносов строк
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
+        first_word = clean_keyword.split('-')[0].split(' ')[0]
 
-        # 4. Ищем в MongoDB ТОЛЬКО те товары, в названии которых есть это слово
-        # $regex делает поиск по тексту, $options: "i" делает его нечувствительным к регистру
-        regex_query = {"name": {"$regex": clean_keyword, "$options": "i"}}
-        matched_docs = await db.products.find(regex_query).to_list(20) # Берем максимум 20 совпадений
+        regex_query = {
+            "$or": [
+                {"name": {"$regex": first_word, "$options": "i"}},
+                {"keywords": {"$regex": first_word, "$options": "i"}}
+            ]
+        }
+        matched_docs = await db.products.find(regex_query).to_list(20)
 
         if not matched_docs:
             return SearchResponse(products=[], confidence="low", ai_analysis=f"Распознано как '{clean_keyword}', но в базе не найдено")
 
-        # 5. Возвращаем найденные товары
         products_list = [Product(**product_doc_to_model(p)) for p in matched_docs]
-        
         return SearchResponse(products=products_list, confidence="high", ai_analysis=f"Распознано: {clean_keyword}")
 
     except Exception as e:
