@@ -103,6 +103,7 @@ class Product(BaseModel):
     barcode: Optional[str] = None
     article_number: Optional[str] = None
     ai_features: Optional[str] = None
+    keywords: str = "" # ДОБАВЛЯЕМ СЮДА (Строка с синонимами через пробел)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -235,31 +236,60 @@ async def create_category(category: Category):
     await db.categories.insert_one(category.dict())
     return category
 
-@api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
     product_dict = product_data.dict()
     uploaded_image_urls = []
     
     # Обрабатываем список картинок
     for image_data in product_dict.get("images", []):
-        # Если строка длинная и похожа на base64, грузим в S3
         if image_data.startswith("data:image") or len(image_data) > 1000:
             url = await upload_base64_to_s3(image_data)
             if url:
                 uploaded_image_urls.append(url)
         else:
-            # Если это уже короткая ссылка, просто оставляем
             uploaded_image_urls.append(image_data)
             
-    # Подменяем массив картинок на S3 ссылки
     product_dict["images"] = uploaded_image_urls
+    
+    # === НОВАЯ ЛОГИКА: ГЕНЕРАЦИЯ KEYWORDS ===
+    generated_keywords = ""
+    # Если есть хотя бы одна загруженная картинка или base64, пытаемся сгенерировать синонимы
+    if product_data.images and (product_data.images[0].startswith("data:image") or len(product_data.images[0]) > 1000):
+        try:
+             first_img_base64 = product_data.images[0]
+             if "," in first_img_base64:
+                 first_img_base64 = first_img_base64.split(",")[1]
+
+             kw_prompt = (
+                 f"Официальное название этого товара: '{product_data.name}'. "
+                 "Посмотри на фото и напиши 10 синонимов, ассоциаций или простых слов, "
+                 "которыми обычный человек мог бы назвать этот предмет (например: если это кружка, напиши 'стакан чашка бокал'). "
+                 "Верни ТОЛЬКО слова через пробел, без запятых и других символов. Никаких пояснений."
+             )
+             kw_messages = [{
+                 "role": "user",
+                 "content": [
+                     {"type": "text", "text": kw_prompt},
+                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{first_img_base64}"}}
+                 ]
+             }]
+             
+             ai_keywords_response = await call_openrouter(kw_messages)
+             if ai_keywords_response:
+                 # Убираем возможные запятые и лишние переносы
+                 generated_keywords = ai_keywords_response.replace(',', ' ').replace('\n', ' ').strip()
+                 logging.info(f"Generated keywords for {product_data.name}: {generated_keywords}")
+        except Exception as e:
+             logging.error(f"Failed to generate keywords: {e}")
+
+    # Добавляем сгенерированные кейворды (даже если они пустые)
+    product_dict["keywords"] = generated_keywords
     
     # Генерируем финальную модель и сохраняем
     product = Product(**product_dict)
     await db.products.insert_one(product.dict())
     
     return product
-
 @api_router.get("/products", response_model=List[Product])
 async def get_products(
     category: Optional[str] = None,
