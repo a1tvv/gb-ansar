@@ -324,16 +324,37 @@ async def search_by_photo(request: PhotoSearchRequest):
         candidates_text = "\n".join([f"#{i+1} - {p['name']}" for i, p in enumerate(matched_docs)])
         refine_messages = [{
             "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"На фото один из этих товаров:\n{candidates_text}\n\nКакой именно? Ответь ТОЛЬКО номером (например: 2). Если не уверен — 0."
-                },
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
-            ]
-        }]
-        refine_result = await call_openrouter(refine_messages)
-        logging.info(f"AI refined: {refine_result}")
+            # ШАГ 2: несколько кандидатов — сравниваем ФОТО с ФОТО
+            content = [{
+                "type": "text",
+                "text": (
+                    "На ПЕРВОМ фото — товар который сфотографировал кассир. "
+                    "Далее идут эталонные фото товаров из каталога, каждое пронумеровано. "
+                    "Сравни первое фото с эталонами и определи какой товар на нём. "
+                    "Ответь ТОЛЬКО номером эталона (например: 2). Если ни один не подходит — 0."
+                )
+            }]
+            # фото кассира
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
+            })
+            # эталонные фото кандидатов из S3
+            for i, p in enumerate(matched_docs):
+                imgs = p.get("images") or []
+                if imgs:
+                    content.append({
+                        "type": "text",
+                        "text": f"Эталон #{i+1} — {p['name']}:"
+                    })
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": imgs[0]}  # S3-ссылка, ИИ сам её загрузит
+                    })
+    
+            refine_messages = [{"role": "user", "content": content}]
+            refine_result = await call_openrouter(refine_messages)
+            logging.info(f"AI refined: {refine_result}")
 
         match = re.search(r'\d+', refine_result)
         if match:
