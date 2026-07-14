@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -118,6 +119,41 @@ export default function CatalogScreen() {
     }
   };
 
+  const deleteProduct = async () => {
+  const doDelete = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/products/${product?.id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        if (Platform.OS === 'web') {
+          window.alert('Товар удалён');
+        }
+        router.back();
+      } else {
+        Alert.alert('Ошибка', 'Не удалось удалить товар');
+      }
+    } catch (error) {
+      Alert.alert('Ошибка', 'Не удалось удалить товар');
+    }
+  };
+
+  if (Platform.OS === 'web') {
+    if (window.confirm('Вы уверены, что хотите удалить этот товар?')) {
+      doDelete();
+    }
+  } else {
+    Alert.alert(
+      'Удаление товара',
+      'Вы уверены, что хотите удалить этот товар?',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Удалить', style: 'destructive', onPress: doDelete },
+      ]
+    );
+  }
+};
+  
   const renderFooter = () => {
     if (!isLoadingMore) return null;
     return (
