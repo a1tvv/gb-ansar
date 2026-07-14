@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,328 +6,300 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
-  Alert,
+  FlatList,
+  Image,
+  TextInput,
   ActivityIndicator,
+  Alert,
+  RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as Linking from 'expo-linking';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const PAGE_SIZE = 20;
 
-export default function CameraScreen() {
+interface Product {
+  id: string;
+  name: string;
+  category?: string;
+  subcategory?: string;
+  barcode?: string;
+  article_number?: string;
+  price: number;
+  images: string[];
+}
+
+export default function CatalogScreen() {
   const router = useRouter();
-  const cameraRef = useRef<any>(null);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [skip, setSkip] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
 
-  if (!permission) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#667eea" />
-      </View>
-    );
-  }
-
-  if (!permission.granted) {
-    return (
-      <SafeAreaView style={styles.permissionWrapper}>
-        <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={80} color="#667eea" />
-          <Text style={styles.permissionTitle}>Нужен доступ к камере</Text>
-          <Text style={styles.permissionText}>
-            Разрешите доступ к камере для AI поиска товаров
-          </Text>
-          {!permission.canAskAgain ? (
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={() => Linking.openSettings()}
-              testID="open-settings-btn"
-            >
-              <Text style={styles.permissionButtonText}>Открыть настройки</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={requestPermission}
-              testID="request-permission-btn"
-            >
-              <Text style={styles.permissionButtonText}>Разрешить доступ</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.permissionButton, styles.backButton]}
-            onPress={() => router.back()}
-          >
-            <Text style={[styles.permissionButtonText, { color: '#667eea' }]}>Назад</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
+  const loadProducts = useCallback(async (reset = false) => {
+    const currentSkip = reset ? 0 : skip;
+    if (!reset && (isLoadingMore || !hasMore)) return;
 
     try {
-      setLoadingMessage('Делаем снимок...');
-      setIsLoading(true);
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
-        base64: true,
-      });
-      await searchProduct(photo.base64);
-    } catch (error) {
-      console.error('Error taking picture:', error);
-      Alert.alert('Ошибка', 'Не удалось сделать фото');
-      setIsLoading(false);
-    }
-  };
-
-  const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.7,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets[0].base64) {
-        setLoadingMessage('AI анализирует товар...');
+      if (reset) {
         setIsLoading(true);
-        await searchProduct(result.assets[0].base64);
+      } else {
+        setIsLoadingMore(true);
       }
-    } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось выбрать изображение');
-    }
-  };
 
-  const searchProduct = async (base64Image: string) => {
-    try {
-      setLoadingMessage('AI анализирует товар...');
-      const response = await fetch(`${API_URL}/api/products/search/photo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_base64: base64Image }),
-      });
-
+      const response = await fetch(
+        `${API_URL}/api/products?skip=${currentSkip}&limit=${PAGE_SIZE}`
+      );
       const data = await response.json();
 
-      if (data.products && data.products.length > 0) {
-        router.replace({
-          pathname: '/product-detail',
-          params: { productId: data.products[0].id },
-        });
+      if (reset) {
+        setProducts(data);
+        setSkip(PAGE_SIZE);
       } else {
-        const aiInfo = data.ai_analysis
-          ? `\n\nAI увидел:\n${data.ai_analysis.substring(0, 200)}...`
-          : '';
-        Alert.alert(
-          'Товар не найден',
-          `Не удалось найти подходящий товар в каталоге.${aiInfo}\n\n💡 Совет: фотографируйте товар на чистом фоне, чтобы AI лучше распознавал товар.`,
-          [
-            { text: 'OK', onPress: () => setIsLoading(false) },
-            {
-              text: 'Добавить в каталог',
-              onPress: () => {
-                setIsLoading(false);
-                router.replace('/add-product');
-              },
-            },
-          ]
-        );
+        setProducts(prev => [...prev, ...data]);
+        setSkip(prev => prev + PAGE_SIZE);
       }
+
+      setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
-      console.error('Error searching product:', error);
+      Alert.alert('Ошибка', 'Не удалось загрузить товары');
+    } finally {
+      setIsLoading(false);
+      setIsLoadingMore(false);
+      setRefreshing(false);
+    }
+  }, [skip, isLoadingMore, hasMore]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setSkip(0);
+      setHasMore(true);
+      loadProducts(true);
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setSkip(0);
+    setHasMore(true);
+    loadProducts(true);
+  };
+
+  const searchProducts = async (query: string) => {
+    if (!query.trim()) {
+      setSkip(0);
+      setHasMore(true);
+      loadProducts(true);
+      return;
+    }
+    try {
+      setIsLoading(true);
+      const response = await fetch(
+        `${API_URL}/api/products/search/text?q=${encodeURIComponent(query)}`
+      );
+      const data = await response.json();
+      setProducts(data);
+      setHasMore(false);
+    } catch (error) {
       Alert.alert('Ошибка', 'Не удалось выполнить поиск');
+    } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSearch = (text: string) => {
+    setSearchQuery(text);
+    if (text.length > 1 || text.length === 0) {
+      searchProducts(text);
+    }
+  };
+
+  const renderFooter = () => {
+    if (!isLoadingMore) return null;
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator size="small" color="#667eea" />
+        <Text style={styles.footerLoaderText}>Загрузка...</Text>
+      </View>
+    );
+  };
+
+  const renderProductCard = ({ item }: { item: Product }) => {
+    const mainImage = item.images && item.images.length > 0 ? item.images[0] : null;
+    return (
+      <TouchableOpacity
+        style={styles.productCard}
+        activeOpacity={0.7}
+        onPress={() => router.push({ pathname: '/product-detail', params: { productId: item.id } })}
+        testID={`product-${item.id}`}
+      >
+        {mainImage ? (
+          <Image
+            source={{
+              uri: mainImage.startsWith('http') ? mainImage : `data:image/jpeg;base64,${mainImage}`
+            }}
+            style={styles.productImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.productImage, styles.noImage]}>
+            <Ionicons name="image-outline" size={48} color="#adb5bd" />
+          </View>
+        )}
+        {item.images && item.images.length > 1 && (
+          <View style={styles.photoCount}>
+            <Ionicons name="images" size={12} color="white" />
+            <Text style={styles.photoCountText}>{item.images.length}</Text>
+          </View>
+        )}
+        <View style={styles.productInfo}>
+          <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+          {(item.category || item.subcategory) && (
+            <Text style={styles.productCategory}>
+              {[item.category, item.subcategory].filter(Boolean).join(' • ')}
+            </Text>
+          )}
+          <View style={styles.priceRow}>
+            <Text style={styles.productPrice}>{item.price.toLocaleString('ru-RU')} ₸</Text>
+            <Ionicons name="chevron-forward" size={20} color="#667eea" />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <CameraView style={styles.camera} ref={cameraRef} facing="back">
-        <SafeAreaView style={styles.cameraOverlay}>
-          <View style={styles.topBar}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Каталог товаров</Text>
+        <TouchableOpacity
+          style={styles.barcodeBtn}
+          onPress={() => router.push('/barcode-scanner')}
+          testID="catalog-barcode-btn"
+        >
+          <Ionicons name="barcode" size={24} color="#667eea" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color="#6c757d" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Поиск товаров..."
+          value={searchQuery}
+          onChangeText={handleSearch}
+          placeholderTextColor="#adb5bd"
+          testID="search-input"
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => handleSearch('')}>
+            <Ionicons name="close-circle" size={20} color="#6c757d" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {isLoading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={styles.loadingText}>Загрузка товаров...</Text>
+        </View>
+      ) : products.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="cube-outline" size={80} color="#dee2e6" />
+          <Text style={styles.emptyTitle}>Товары не найдены</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery ? 'Попробуйте изменить запрос' : 'Добавьте первый товар в каталог'}
+          </Text>
+          {!searchQuery && (
             <TouchableOpacity
-              style={styles.backBtn}
-              onPress={() => router.back()}
-              testID="back-btn"
+              style={styles.addBtn}
+              onPress={() => router.push('/add-product')}
             >
-              <Ionicons name="arrow-back" size={28} color="white" />
+              <Ionicons name="add" size={20} color="white" />
+              <Text style={styles.addBtnText}>Добавить товар</Text>
             </TouchableOpacity>
-            <View style={styles.titleContainer}>
-              <Text style={styles.title}>AI Поиск</Text>
-              <Text style={styles.subtitle}>Сфотографируйте товар</Text>
-            </View>
-            <View style={{ width: 44 }} />
-          </View>
-
-          <View style={styles.centerFrame}>
-            <View style={[styles.frameCorner, styles.topLeft]} />
-            <View style={[styles.frameCorner, styles.topRight]} />
-            <View style={[styles.frameCorner, styles.bottomLeft]} />
-            <View style={[styles.frameCorner, styles.bottomRight]} />
-            <View style={styles.tipContainer}>
-              <Text style={styles.tipText}>💡 Лучше фотографировать на чистом фоне</Text>
-            </View>
-          </View>
-
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={styles.galleryBtn}
-              onPress={pickImage}
-              disabled={isLoading}
-              testID="gallery-btn"
-            >
-              <Ionicons name="images" size={28} color="white" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.captureBtn}
-              onPress={takePicture}
-              disabled={isLoading}
-              testID="capture-btn"
-            >
-              {isLoading ? (
-                <ActivityIndicator size="large" color="#667eea" />
-              ) : (
-                <View style={styles.captureBtnInner} />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.scannerBtn}
-              onPress={() => router.push('/barcode-scanner')}
-              disabled={isLoading}
-              testID="barcode-btn"
-            >
-              <Ionicons name="barcode" size={28} color="white" />
-            </TouchableOpacity>
-          </View>
-
-          {isLoading && (
-            <View style={styles.loadingOverlay}>
-              <View style={styles.loadingCard}>
-                <ActivityIndicator size="large" color="#667eea" />
-                <Text style={styles.loadingTitle}>{loadingMessage}</Text>
-                <Text style={styles.loadingSubtitle}>
-                  AI анализирует товар на изображении
-                </Text>
-              </View>
-            </View>
           )}
-        </SafeAreaView>
-      </CameraView>
-    </View>
+        </View>
+      ) : (
+        <FlatList
+          data={products}
+          renderItem={renderProductCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
+          }
+          onEndReached={() => {
+            if (!searchQuery && hasMore && !isLoadingMore) {
+              loadProducts(false);
+            }
+          }}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={renderFooter}
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  camera: { flex: 1 },
-  cameraOverlay: { flex: 1, backgroundColor: 'transparent' },
-  topBar: {
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 16,
+    paddingHorizontal: 16, paddingVertical: 16, backgroundColor: 'white',
   },
-  backBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center', justifyContent: 'center',
+  backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  barcodeBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  searchContainer: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+    marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
+    borderRadius: 12,
   },
-  titleContainer: { alignItems: 'center' },
-  title: { fontSize: 20, fontWeight: 'bold', color: 'white' },
-  subtitle: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  centerFrame: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 40, position: 'relative',
+  searchIcon: { marginRight: 12 },
+  searchInput: { flex: 1, fontSize: 16, color: '#1a1a1a' },
+  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  productCard: {
+    backgroundColor: 'white', borderRadius: 16, marginBottom: 16,
+    overflow: 'hidden', position: 'relative',
   },
-  frameCorner: {
-    position: 'absolute', width: 60, height: 60, borderColor: 'white',
+  productImage: { width: '100%', height: 200, backgroundColor: '#f8f9fa' },
+  noImage: { alignItems: 'center', justifyContent: 'center' },
+  photoCount: {
+    position: 'absolute', top: 12, right: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
   },
-  topLeft: {
-    top: '25%', left: 40,
-    borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 8,
+  photoCountText: { color: 'white', fontSize: 12, fontWeight: '600' },
+  productInfo: { padding: 16 },
+  productName: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
+  productCategory: { fontSize: 14, color: '#6c757d', marginBottom: 8 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  productPrice: { fontSize: 20, fontWeight: 'bold', color: '#667eea' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { marginTop: 16, fontSize: 16, color: '#6c757d' },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  emptyTitle: { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16, marginBottom: 8 },
+  emptyText: { fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24 },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#667eea', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
   },
-  topRight: {
-    top: '25%', right: 40,
-    borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 8,
+  addBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  footerLoader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 16, gap: 8,
   },
-  bottomLeft: {
-    bottom: '25%', left: 40,
-    borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 8,
-  },
-  bottomRight: {
-    bottom: '25%', right: 40,
-    borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 8,
-  },
-  tipContainer: {
-    position: 'absolute', bottom: '15%',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
-  },
-  tipText: { color: 'white', fontSize: 13, textAlign: 'center' },
-  bottomBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
-    paddingBottom: 40, paddingHorizontal: 24,
-  },
-  galleryBtn: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  scannerBtn: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  captureBtn: {
-    width: 80, height: 80, borderRadius: 40, backgroundColor: 'white',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 4, borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  captureBtnInner: {
-    width: 64, height: 64, borderRadius: 32, backgroundColor: 'white',
-    borderWidth: 2, borderColor: '#667eea',
-  },
-  loadingOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
-  },
-  loadingCard: {
-    backgroundColor: 'white', padding: 32, borderRadius: 20,
-    alignItems: 'center', minWidth: 250,
-  },
-  loadingTitle: {
-    marginTop: 16, fontSize: 18, fontWeight: '600', color: '#1a1a1a',
-  },
-  loadingSubtitle: {
-    marginTop: 4, fontSize: 14, color: '#6c757d', textAlign: 'center',
-  },
-  permissionWrapper: { flex: 1, backgroundColor: '#f8f9fa' },
-  permissionContainer: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
-  },
-  permissionTitle: {
-    fontSize: 24, fontWeight: 'bold', color: '#1a1a1a',
-    marginTop: 24, marginBottom: 12,
-  },
-  permissionText: {
-    fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 32,
-  },
-  permissionButton: {
-    width: '100%', backgroundColor: '#667eea',
-    paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12,
-  },
-  permissionButtonText: { fontSize: 16, fontWeight: '600', color: 'white' },
-  backButton: {
-    backgroundColor: 'transparent', borderWidth: 2, borderColor: '#667eea',
-  },
+  footerLoaderText: { fontSize: 14, color: '#6c757d' },
 });
