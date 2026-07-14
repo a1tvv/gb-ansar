@@ -141,15 +141,17 @@ export default function HomeScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.card}
               >
-                <View style={styles.cardIcon}>
-                  <Ionicons name={item.icon} size={36} color="white" />
+                {/* Оборачиваем иконку и заголовок в один ряд */}
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.cardIcon}>
+                    <Ionicons name={item.icon} size={32} color="white" />
+                  </View>
+                  <Text style={styles.cardTitle}>{item.title}</Text>
                 </View>
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </View>
+  
+  {/* Подзаголовок оставляем снизу */}
+  <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
+</LinearGradient>
 
         <View style={styles.footer}>
           {isInstalled ? (
@@ -157,7 +159,7 @@ export default function HomeScreen() {
               ✓ Установлено как приложение • v2.0.0
             </Text>
           ) : (
-            <Text style={styles.footerText}>Версия 2.0.0 • AI Vision + OCR</Text>
+            <Text style={styles.footerText}>Разработчик ab.dussi</Text>
           )}
         </View>
       </ScrollView>
