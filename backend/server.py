@@ -16,6 +16,8 @@ import re
 import aioboto3
 import base64
 
+from bot import build_bot
+
 s3_endpoint = os.environ.get('S3_ENDPOINT_URL')
 s3_bucket = os.environ.get('S3_BUCKET_NAME')
 s3_access_key = os.environ.get('S3_ACCESS_KEY')
@@ -28,28 +30,6 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Индексы для быстрого поиска
-    await db.products.create_index("id")
-    await db.products.create_index("name")
-    await db.products.create_index("barcode")
-    yield
-    client.close()
-
-
-app = FastAPI(lifespan=lifespan)
-api_router = APIRouter(prefix="/api")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -196,6 +176,45 @@ def product_doc_to_model(doc: dict) -> dict:
     return doc
 
 
+# ============= Bot bootstrap (нужен ДО lifespan, но ПОСЛЕ хелперов выше) =============
+
+bot_task = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Индексы для быстрого поиска
+    await db.products.create_index("id")
+    await db.products.create_index("name")
+    await db.products.create_index("barcode")
+
+    global bot_task
+    bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product)
+    if bot and dp:
+        bot_task = asyncio.create_task(dp.start_polling(bot))
+        logging.info("Telegram bot polling started")
+    else:
+        logging.info("Telegram bot NOT started (нет TELEGRAM_BOT_TOKEN)")
+
+    yield
+
+    if bot_task:
+        bot_task.cancel()
+    client.close()
+
+
+app = FastAPI(lifespan=lifespan)
+api_router = APIRouter(prefix="/api")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 # ============= Category Routes =============
 
 @api_router.get("/categories", response_model=List[Category])
@@ -292,28 +311,28 @@ async def search_by_photo(request: PhotoSearchRequest):
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
             ]
         }]
-        
+
         ai_keyword = await call_openrouter(messages)
         logging.info(f"AI recognized: {ai_keyword}")
-        
+
         if not ai_keyword:
             return SearchResponse(products=[], confidence="no_match", ai_analysis="Не удалось распознать ИИ")
-            
+
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
-        
+
         regex_query = {
             "$or": [
                 {"name": {"$regex": first_word, "$options": "i"}},
                 {"keywords": {"$regex": first_word, "$options": "i"}}
             ]
         }
-        
+
         matched_docs = await db.products.find(regex_query).to_list(20)
-        
+
         if not matched_docs:
             return SearchResponse(products=[], confidence="low", ai_analysis=f"Распознано как '{clean_keyword}', но в базе не найдено")
-            
+
         # Один кандидат — сразу возвращаем
         if len(matched_docs) == 1:
             return SearchResponse(
@@ -321,7 +340,7 @@ async def search_by_photo(request: PhotoSearchRequest):
                 confidence="high",
                 ai_analysis=f"Распознано: {clean_keyword}"
             )
-            
+
         # ШАГ 2: несколько кандидатов — сравниваем ФОТО с ФОТО
         content = [{
             "type": "text",
@@ -332,14 +351,12 @@ async def search_by_photo(request: PhotoSearchRequest):
                 "Ответь ТОЛЬКО номером эталона (например: 2). Если ни один не подходит — 0."
             )
         }]
-        
-        # фото кассира
+
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
         })
-        
-        # эталонные фото кандидатов из S3
+
         for i, p in enumerate(matched_docs):
             imgs = p.get("images") or []
             if imgs:
@@ -349,13 +366,13 @@ async def search_by_photo(request: PhotoSearchRequest):
                 })
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": imgs[0]}  # S3-ссылка, ИИ сам её загрузит
+                    "image_url": {"url": imgs[0]}
                 })
-                
+
         refine_messages = [{"role": "user", "content": content}]
         refine_result = await call_openrouter(refine_messages)
         logging.info(f"AI refined: {refine_result}")
-        
+
         match = re.search(r'\d+', refine_result)
         if match:
             idx = int(match.group()) - 1
@@ -365,14 +382,12 @@ async def search_by_photo(request: PhotoSearchRequest):
                     confidence="high",
                     ai_analysis=f"Распознано: {matched_docs[idx]['name']}"
                 )
-                
-        # ИИ не уверен — весь список, кассир выберет сам
+
         products_list = [Product(**product_doc_to_model(p)) for p in matched_docs]
         return SearchResponse(products=products_list, confidence="medium", ai_analysis=f"Найдено несколько: {clean_keyword}")
-        
+
     except Exception as e:
         logging.error(f"Error in photo search: {str(e)}")
-        from fastapi import HTTPException # На всякий случай, если забыл импорт наверху
         raise HTTPException(status_code=500, detail=str(e))
 
 
