@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white', borderRadius: 16, marginBottom: 16,
     overflow: 'hidden', position: 'relative',
   },
-  productImage: { width: '100%', height: 200, backgroundColor: '#f8f9fa' },
+  productImage: { width: '100%', height: 400, backgroundColor: '#f8f9fa' },
   noImage: { alignItems: 'center', justifyContent: 'center' },
   photoCount: {
     position: 'absolute', top: 12, right: 12,
