@@ -9,3 +9,4 @@ grpcio
 protobuf
 httpx
 aioboto3
+aiogram
