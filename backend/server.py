@@ -341,24 +341,22 @@ async def search_by_photo(request: PhotoSearchRequest):
                 ai_analysis=f"Распознано: {clean_keyword}"
             )
 
-      # ШАГ 2: несколько кандидатов — сравниваем ФОТО с ФОТО
+        # ШАГ 2: несколько кандидатов — сравниваем ФОТО с ФОТО
         content = [{
             "type": "text",
             "text": (
                 "На ПЕРВОМ фото — товар который сфотографировал кассир. "
-                "Далее идут эталонные фото из каталога, каждое пронумеровано. "
-                "Сравни первое фото с эталонами (упаковка, цвет, надписи). "
-                "ПОДУМАЙ ШАГ ЗА ШАГОМ. Кратко напиши свои рассуждения, а в самом конце ОБЯЗАТЕЛЬНО укажи номер совпавшего эталона строго в формате: 'ИТОГ: X' (где X — номер, или 0 если точного совпадения нет)."
+                "Далее идут эталонные фото товаров из каталога, каждое пронумеровано. "
+                "Сравни первое фото с эталонами и определи какой товар на нём. "
+                "Ответь ТОЛЬКО номером эталона (например: 2). Если ни один не подходит — 0."
             )
         }]
 
-        # фото кассира
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
         })
 
-        # эталонные фото кандидатов из S3
         for i, p in enumerate(matched_docs):
             imgs = p.get("images") or []
             if imgs:
@@ -373,29 +371,25 @@ async def search_by_photo(request: PhotoSearchRequest):
 
         refine_messages = [{"role": "user", "content": content}]
         refine_result = await call_openrouter(refine_messages)
-        logging.info(f"AI refined logic: {refine_result}") # Теперь тут будут подробные мысли ИИ!
+        logging.info(f"AI refined: {refine_result}")
 
-        # Умный поиск ответа в тексте ИИ
-        match = re.search(r'ИТОГ:\s*(\d+)', refine_result, re.IGNORECASE)
-        
-        idx = -1
+        match = re.search(r'\d+', refine_result)
         if match:
-            idx = int(match.group(1)) - 1
-        else:
-            # Если ИИ забыл написать слово ИТОГ, просто берем последнее число из его текста
-            numbers = re.findall(r'\d+', refine_result)
-            if numbers:
-                idx = int(numbers[-1]) - 1
-
-        if 0 <= idx < len(matched_docs):
-            return SearchResponse(
-                products=[Product(**product_doc_to_model(matched_docs[idx]))],
-                confidence="high",
-                ai_analysis=f"Распознано: {matched_docs[idx]['name']}" # Можно добавить сюда refine_result, если хочешь видеть мысли ИИ на фронте
-            )
+            idx = int(match.group()) - 1
+            if 0 <= idx < len(matched_docs):
+                return SearchResponse(
+                    products=[Product(**product_doc_to_model(matched_docs[idx]))],
+                    confidence="high",
+                    ai_analysis=f"Распознано: {matched_docs[idx]['name']}"
+                )
 
         products_list = [Product(**product_doc_to_model(p)) for p in matched_docs]
-        return SearchResponse(products=products_list, confidence="medium", ai_analysis=f"Не нашел точного совпадения. Мысли ИИ: {refine_result}")
+        return SearchResponse(products=products_list, confidence="medium", ai_analysis=f"Найдено несколько: {clean_keyword}")
+
+    except Exception as e:
+        logging.error(f"Error in photo search: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str):
