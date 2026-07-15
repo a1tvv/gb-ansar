@@ -281,7 +281,7 @@ async def get_products(
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
-    products = await db.products.find({"name": {"$regex": q, "$options": "i"}}).to_list(1000)
+    products = await db.products.find({"name": {"$regex": q, "$options": "i"}}).sort("created_at", -1).to_list(1000)
     return [Product(**product_doc_to_model(p)) for p in products]
 
 
