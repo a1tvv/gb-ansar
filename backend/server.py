@@ -269,7 +269,7 @@ async def get_products(
     if subcategory:
         query["subcategory"] = subcategory
 
-   products = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    products = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     result = []
     for p in products:
         doc = product_doc_to_model(p)
