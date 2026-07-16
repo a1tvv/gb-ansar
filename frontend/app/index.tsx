@@ -22,7 +22,6 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web') return;
     if (typeof window === 'undefined') return;
 
-    // Check if already installed (standalone mode)
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true;
@@ -31,7 +30,6 @@ export default function HomeScreen() {
       return;
     }
 
-    // Check if install prompt is already available
     if ((window as any).deferredPWAPrompt) {
       setShowInstallBanner(true);
     }
@@ -87,7 +85,7 @@ export default function HomeScreen() {
       icon: 'grid' as const,
       color: ['#f093fb', '#f5576c'],
       route: '/catalog',
-    }
+    },
   ];
 
   return (
@@ -95,7 +93,7 @@ export default function HomeScreen() {
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>AI Каталог</Text>
+          <Text style={styles.title}>Ansar HomeWear</Text>
           <Text style={styles.subtitle}>Умный поиск товаров</Text>
         </View>
 
@@ -133,17 +131,17 @@ export default function HomeScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.card}
               >
-                {/* Оборачиваем иконку и заголовок в один ряд */}
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.cardIcon}>
                     <Ionicons name={item.icon} size={32} color="white" />
                   </View>
                   <Text style={styles.cardTitle}>{item.title}</Text>
                 </View>
-  
-  {/* Подзаголовок оставляем снизу */}
-  <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
-</LinearGradient>
+                <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <View style={styles.footer}>
           {isInstalled ? (
@@ -234,14 +232,24 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
   cardIcon: {
-    marginBottom: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 4,
   },
   cardSubtitle: {
     fontSize: 14,
