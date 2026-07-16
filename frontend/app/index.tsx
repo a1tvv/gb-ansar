@@ -87,15 +87,7 @@ export default function HomeScreen() {
       icon: 'grid' as const,
       color: ['#f093fb', '#f5576c'],
       route: '/catalog',
-    },
-    {
-      id: '4',
-      title: 'Добавить товар',
-      subtitle: 'Новый товар в каталог',
-      icon: 'add-circle' as const,
-      color: ['#4facfe', '#00f2fe'],
-      route: '/add-product',
-    },
+    }
   ];
 
   return (
