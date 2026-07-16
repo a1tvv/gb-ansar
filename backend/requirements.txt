@@ -10,3 +10,4 @@ protobuf
 httpx
 aioboto3
 aiogram
+Pillow
