@@ -8,11 +8,12 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message,
     BotCommand,
-    CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    CallbackQuery,
 )
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 
 logger = logging.getLogger(__name__)
 
@@ -20,53 +21,47 @@ logger = logging.getLogger(__name__)
 user_states: dict[int, dict] = {}
 
 
-def reset_product(state: dict):
-    """Сбрасывает данные текущего товара, но НЕ выключает сессию."""
-    state["step"] = "photos"
-    state["images"] = []
-    state["name"] = None
-    state["price"] = None
-    state["barcode"] = None
-    state["article_number"] = None
-
-
-def new_state() -> dict:
+def blank_state():
     return {
-        "active": False,       # сессия включена (/start) или нет (/stop)
-        "step": "idle",
+        "session_active": False,      # запущена ли рабочая сессия (/start)
+        "step": "idle",               # idle | photos | name | price | barcode | article
         "images": [],
         "name": None,
         "price": None,
         "barcode": None,
         "article_number": None,
-        "bot_msgs": [],        # id сообщений бота, которые надо удалить при следующем шаге
+        "last_bot_message_id": None,  # ID последнего сообщения бота — его удаляем при переходе
     }
 
 
-def kb_done() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Готово", callback_data="done")]
-    ])
+def reset_product(chat_id: int):
+    """Сбрасывает данные текущего товара, но сессию оставляет активной."""
+    state = user_states.get(chat_id) or blank_state()
+    session_active = state.get("session_active", False)
+    new_state = blank_state()
+    new_state["session_active"] = session_active
+    if session_active:
+        new_state["step"] = "photos"
+    user_states[chat_id] = new_state
 
 
-def kb_send() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Отправить без артикула", callback_data="send")]
-    ])
-
-
-def kb_send_final() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Отправить", callback_data="send")]
-    ])
+def compress_image_bytes(raw_bytes: bytes, max_width: int = 800, quality: int = 65) -> bytes:
+    try:
+        img = Image.open(BytesIO(raw_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        if img.width > max_width:
+            ratio = max_width / img.width
+            img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        logger.error(f"Image compression failed: {e}")
+        return raw_bytes
 
 
 def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
-    """
-    Собирает Telegram-бота, переиспользуя логику из основного сервера
-    (S3-загрузка, генерация keywords, модель Product).
-    Возвращает (bot, dispatcher) или (None, None) если токен не задан.
-    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.warning("TELEGRAM_BOT_TOKEN не задан — бот отключён")
@@ -75,192 +70,223 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
     bot = Bot(token=token)
     dp = Dispatcher()
 
-    # ---------- служебные ----------
+    # ============= Хелперы для управления сообщениями =============
 
-    def get_state(chat_id: int) -> dict:
-        if chat_id not in user_states:
-            user_states[chat_id] = new_state()
-        return user_states[chat_id]
-
-    async def clear_bot_msgs(chat_id: int):
-        """Удаляет прошлые сообщения бота (чтобы чат не засорялся)."""
-        state = get_state(chat_id)
-        for msg_id in state["bot_msgs"]:
-            try:
-                await bot.delete_message(chat_id, msg_id)
-            except Exception:
-                pass  # сообщение уже удалено или слишком старое
-        state["bot_msgs"] = []
-
-    async def send_step(chat_id: int, text: str, keyboard: InlineKeyboardMarkup | None = None):
-        """Удаляет старые сообщения бота и присылает новое."""
-        await clear_bot_msgs(chat_id)
-        msg = await bot.send_message(chat_id, text, reply_markup=keyboard)
-        get_state(chat_id)["bot_msgs"].append(msg.message_id)
-
-    def compress_image_bytes(raw_bytes: bytes, max_width: int = 800, quality: int = 65) -> bytes:
+    async def delete_last(chat_id: int):
+        """Удаляет предыдущее сообщение бота, если оно есть."""
+        state = user_states.get(chat_id)
+        if not state or not state.get("last_bot_message_id"):
+            return
         try:
-            img = Image.open(BytesIO(raw_bytes))
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            if img.width > max_width:
-                ratio = max_width / img.width
-                img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
-            buffer = BytesIO()
-            img.save(buffer, format="JPEG", quality=quality, optimize=True)
-            return buffer.getvalue()
-        except Exception as e:
-            logger.error(f"Image compression failed: {e}")
-            return raw_bytes
+            await bot.delete_message(chat_id, state["last_bot_message_id"])
+        except TelegramBadRequest:
+            pass  # сообщение уже удалено или устарело
+        state["last_bot_message_id"] = None
+
+    async def send_screen(chat_id: int, text: str, keyboard: InlineKeyboardMarkup | None = None):
+        """Удаляет прошлый экран бота и отправляет новый."""
+        await delete_last(chat_id)
+        msg = await bot.send_message(chat_id, text, reply_markup=keyboard)
+        state = user_states.setdefault(chat_id, blank_state())
+        state["last_bot_message_id"] = msg.message_id
+
+    # ============= Клавиатуры =============
+
+    def kb_photos(has_photos: bool) -> InlineKeyboardMarkup:
+        rows = []
+        if has_photos:
+            rows.append([InlineKeyboardButton(text="✅ Готово", callback_data="done_photos")])
+        rows.append([InlineKeyboardButton(text="⏹ Завершить сессию", callback_data="stop_session")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def kb_article() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Сохранить товар", callback_data="save_product")],
+        ])
+
+    def kb_after_save() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить ещё товар", callback_data="add_more")],
+            [InlineKeyboardButton(text="⏹ Завершить сессию", callback_data="stop_session")],
+        ])
+
+    # ============= Команды =============
 
     async def on_startup(bot: Bot):
         await bot.set_my_commands([
             BotCommand(command="start", description="Начать рабочую сессию"),
-            BotCommand(command="stop", description="Закончить рабочую сессию"),
+            BotCommand(command="stop", description="Завершить сессию"),
         ])
 
     dp.startup.register(on_startup)
 
-    # ---------- команды ----------
-
     @dp.message(Command("start"))
     async def cmd_start(message: Message):
-        state = get_state(message.chat.id)
-        state.update(new_state())
-        state["active"] = True
-        reset_product(state)
-        await send_step(
+        # Стираем предыдущее сообщение бота, если было
+        await delete_last(message.chat.id)
+        user_states[message.chat.id] = blank_state()
+        user_states[message.chat.id]["session_active"] = True
+        user_states[message.chat.id]["step"] = "photos"
+        await send_screen(
             message.chat.id,
-            "🟢 Рабочая сессия начата!\n\n"
-            "📸 Отправьте фото товара (можно несколько).\n"
-            "Когда фото закончатся — нажмите «Готово».\n\n"
-            "Добавляйте товары один за другим весь день.\n"
-            "В конце нажмите /stop.",
-            kb_done(),
+            "👋 Сессия запущена. Добавляй товары сколько нужно.\n\n"
+            "📸 Отправьте фото товара (можно несколько, по одному).",
+            kb_photos(has_photos=False),
         )
 
     @dp.message(Command("stop"))
     async def cmd_stop(message: Message):
-        state = get_state(message.chat.id)
-        await clear_bot_msgs(message.chat.id)
-        state.update(new_state())  # active=False, step=idle
-        await bot.send_message(
-            message.chat.id,
-            "🔴 Рабочая сессия завершена. Хорошая работа!\n"
-            "Чтобы начать снова — нажмите /start."
-        )
+        await delete_last(message.chat.id)
+        user_states[message.chat.id] = blank_state()
+        await bot.send_message(message.chat.id, "⏹ Сессия завершена. Напишите /start чтобы начать снова.")
 
-    # ---------- инлайн-кнопки ----------
-
-    @dp.callback_query(F.data == "done")
-    async def cb_done(callback: CallbackQuery):
-        chat_id = callback.message.chat.id
-        state = get_state(chat_id)
-        await callback.answer()
-
-        if not state["active"] or state["step"] != "photos":
-            return
-        if not state["images"]:
-            await callback.answer("⚠️ Сначала отправьте хотя бы одно фото!", show_alert=True)
-            return
-
-        state["step"] = "name"
-        await send_step(chat_id, "✏️ Название товара?")
-
-    @dp.callback_query(F.data == "send")
-    async def cb_send(callback: CallbackQuery):
-        chat_id = callback.message.chat.id
-        state = get_state(chat_id)
-        await callback.answer()
-
-        if not state["active"] or state["step"] != "article":
-            return
-
-        await send_step(chat_id, "⏳ Сохраняю товар...")
-        await save_product(chat_id)
-
-    # ---------- фото ----------
+    # ============= Фото =============
 
     @dp.message(F.photo)
     async def handle_photo(message: Message):
-        state = get_state(message.chat.id)
-        if not state["active"]:
-            await send_step(message.chat.id, "Нажмите /start чтобы начать рабочую сессию.")
+        state = user_states.get(message.chat.id)
+        if not state or not state["session_active"]:
+            await bot.send_message(message.chat.id, "Напишите /start чтобы начать сессию.")
             return
         if state["step"] != "photos":
-            return  # фото не по сценарию — игнорируем
+            # пришло фото в момент когда бот ждёт текст — игнорим мягко
+            await bot.send_message(message.chat.id, "⚠️ Сейчас жду текст, а не фото.")
+            return
 
         photo = message.photo[-1]
         file = await bot.get_file(photo.file_id)
         file_bytes = await bot.download_file(file.file_path)
-        compressed = compress_image_bytes(file_bytes.read())
+        raw = file_bytes.read()
+        compressed = compress_image_bytes(raw)
         b64 = base64.b64encode(compressed).decode("utf-8")
         state["images"].append(b64)
 
-        await send_step(
+        # Удаляем сообщение с фото от пользователя, чтобы чат не засорялся
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+
+        await send_screen(
             message.chat.id,
-            f"✅ Фото: {len(state['images'])} шт. Ещё фото или нажмите «Готово».",
-            kb_done(),
+            f"📸 Фото добавлено: {len(state['images'])} шт.\n\n"
+            f"Пришлите ещё или нажмите «Готово».",
+            kb_photos(has_photos=True),
         )
 
-    # ---------- текстовые шаги ----------
+    # ============= Callback-кнопки =============
 
-    @dp.message(F.text)
+    @dp.callback_query(F.data == "done_photos")
+    async def cb_done_photos(query: CallbackQuery):
+        state = user_states.get(query.message.chat.id)
+        if not state or state["step"] != "photos":
+            await query.answer("Не сейчас", show_alert=False)
+            return
+        if not state["images"]:
+            await query.answer("Сначала отправьте хотя бы одно фото", show_alert=True)
+            return
+        state["step"] = "name"
+        await query.answer()
+        await send_screen(
+            query.message.chat.id,
+            f"✅ Фото сохранены ({len(state['images'])} шт.)\n\n"
+            f"✏️ Пришлите название товара сообщением.",
+        )
+
+    @dp.callback_query(F.data == "save_product")
+    async def cb_save_product(query: CallbackQuery):
+        state = user_states.get(query.message.chat.id)
+        if not state or state["step"] != "article":
+            await query.answer("Не сейчас", show_alert=False)
+            return
+        await query.answer()
+        await send_screen(query.message.chat.id, "⏳ Сохраняю товар...")
+        await save_product(query.message.chat.id)
+
+    @dp.callback_query(F.data == "add_more")
+    async def cb_add_more(query: CallbackQuery):
+        await query.answer()
+        reset_product(query.message.chat.id)
+        await send_screen(
+            query.message.chat.id,
+            "📸 Отправьте фото следующего товара.",
+            kb_photos(has_photos=False),
+        )
+
+    @dp.callback_query(F.data == "stop_session")
+    async def cb_stop_session(query: CallbackQuery):
+        await query.answer()
+        await delete_last(query.message.chat.id)
+        user_states[query.message.chat.id] = blank_state()
+        await bot.send_message(query.message.chat.id, "⏹ Сессия завершена. Напишите /start чтобы начать снова.")
+
+    # ============= Текст (название → цена → штрихкод → артикул) =============
+
+    @dp.message(F.text & ~F.text.startswith("/"))
     async def handle_text(message: Message):
-        state = get_state(message.chat.id)
-        if not state["active"]:
-            await send_step(message.chat.id, "Нажмите /start чтобы начать рабочую сессию.")
+        state = user_states.get(message.chat.id)
+        if not state or not state["session_active"]:
+            await bot.send_message(message.chat.id, "Напишите /start чтобы начать сессию.")
             return
 
         text = message.text.strip()
+        chat_id = message.chat.id
+
+        # Убираем сообщение пользователя, чтобы чат оставался чистым
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
 
         if state["step"] == "photos":
-            await send_step(
-                message.chat.id,
-                "📸 Сейчас нужно отправить фото товара. Когда закончите — нажмите «Готово».",
-                kb_done(),
+            await send_screen(
+                chat_id,
+                "⚠️ Сейчас жду фото. Пришлите фото или нажмите «Готово», если уже отправили.",
+                kb_photos(has_photos=bool(state["images"])),
             )
             return
 
         if state["step"] == "name":
             state["name"] = text
             state["step"] = "price"
-            await send_step(message.chat.id, "💰 Цена товара? (только число, например 350)")
+            await send_screen(chat_id, f"✏️ Название: {text}\n\n💰 Пришлите цену (число, например 350).")
             return
 
         if state["step"] == "price":
             try:
                 state["price"] = float(text.replace(",", "."))
             except ValueError:
-                await send_step(message.chat.id, "⚠️ Введите цену числом, например 350")
+                await send_screen(chat_id, "⚠️ Цена должна быть числом. Пришлите ещё раз, например: 350")
                 return
             state["step"] = "barcode"
-            await send_step(message.chat.id, "📦 Штрихкод? (числа с упаковки товара)")
+            await send_screen(chat_id, f"💰 Цена: {state['price']} ₸\n\n📦 Пришлите штрихкод (числа с упаковки).")
             return
 
         if state["step"] == "barcode":
             state["barcode"] = text
             state["step"] = "article"
-            await send_step(
-                message.chat.id,
-                "🔖 Если есть артикул — отправьте его.\nЕсли нет — нажмите кнопку ниже.",
-                kb_send(),
+            await send_screen(
+                chat_id,
+                f"📦 Штрихкод: {text}\n\n"
+                f"🔖 Если есть артикул — пришлите его сообщением.\n"
+                f"Если нет — сразу жмите «Сохранить товар».",
+                kb_article(),
             )
             return
 
         if state["step"] == "article":
             state["article_number"] = text
-            await send_step(
-                message.chat.id,
-                "✅ Артикул сохранён. Нажмите «Отправить» чтобы загрузить товар.",
-                kb_send_final(),
+            await send_screen(
+                chat_id,
+                f"🔖 Артикул: {text}\n\nЖмите «Сохранить товар».",
+                kb_article(),
             )
             return
 
-    # ---------- сохранение ----------
+    # ============= Сохранение =============
 
     async def save_product(chat_id: int):
-        state = get_state(chat_id)
+        state = user_states[chat_id]
         try:
             uploaded_urls = []
             for img in state["images"]:
@@ -280,27 +306,27 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             )
             await db.products.insert_one(product.dict())
 
-            # Итог по товару оставляем в чате НАВСЕГДА (не удаляем) — как журнал
-            await clear_bot_msgs(chat_id)
-            await bot.send_message(
+            await send_screen(
                 chat_id,
-                f"✅ Товар добавлен!\n"
-                f"📦 {product.name} — {product.price} ₸\n"
-                f"🖼 Фото: {len(uploaded_urls)} | Штрихкод: {product.barcode or '—'} | Артикул: {product.article_number or '—'}"
+                f"✅ Товар добавлен на сайт!\n\n"
+                f"📦 {product.name}\n"
+                f"💰 {product.price} ₸\n"
+                f"🖼 Фото: {len(uploaded_urls)}\n"
+                f"Штрихкод: {product.barcode or '—'}\n"
+                f"Артикул: {product.article_number or '—'}",
+                kb_after_save(),
             )
-
-            # Сразу готовы к следующему товару — /start не нужен
-            reset_product(state)
-            msg = await bot.send_message(
-                chat_id,
-                "📸 Следующий товар! Отправьте фото.",
-                reply_markup=kb_done(),
-            )
-            state["bot_msgs"].append(msg.message_id)
-
+            # Сбрасываем данные товара, оставляем сессию активной
+            reset_product(chat_id)
+            # step у нас после reset_product = photos, но экран уже показан выше с кнопками
+            # так что оставляем как есть — юзер сам выберет "Добавить ещё" или "Завершить"
         except Exception as e:
             logger.error(f"Bot save_product error: {e}")
-            reset_product(state)
-            await send_step(chat_id, "❌ Ошибка при сохранении. Отправьте фото товара заново.", kb_done())
+            await send_screen(
+                chat_id,
+                "❌ Ошибка при сохранении. Начните заново через «Добавить ещё товар».",
+                kb_after_save(),
+            )
+            reset_product(chat_id)
 
     return bot, dp
