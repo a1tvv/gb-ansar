@@ -67,7 +67,7 @@ export default function HomeScreen() {
       title: 'Поиск по фото',
       subtitle: 'Сфотографируйте товар',
       icon: 'camera' as const,
-      color: ['#667eea', '#764ba2'],
+      color: ['#3654d9', '#764ba2'],
       route: '/camera',
     },
     {
@@ -84,6 +84,14 @@ export default function HomeScreen() {
       subtitle: 'Просмотр всех товаров',
       icon: 'grid' as const,
       color: ['#f093fb', '#f5576c'],
+      route: '/catalog',
+    },
+    {
+      id: '4',
+      title: 'Товар на рассмотрение',
+      subtitle: 'Просмотр всех товаров',
+      icon: 'grid' as const,
+      color: ['#5500ff', '#2ce2fa'],
       route: '/catalog',
     },
   ];
