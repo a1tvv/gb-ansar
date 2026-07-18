@@ -89,8 +89,8 @@ export default function HomeScreen() {
     {
       id: '4',
       title: 'Товар на рассмотрение',
-      subtitle: 'Просмотр всех товаров',
-      icon: 'grid' as const,
+      subtitle: 'Проблемные товары',
+      icon: 'plus' as const,
       color: ['#5500ff', '#2ce2fa'],
       route: '/catalog',
     },
