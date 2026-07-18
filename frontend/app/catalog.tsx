@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,18 @@ interface Product {
   images: string[];
 }
 
+// Skeleton-плейсхолдер вместо серого экрана
+const SkeletonCard = () => (
+  <View style={styles.productCard}>
+    <View style={[styles.productImage, styles.skeleton]} />
+    <View style={styles.productInfo}>
+      <View style={[styles.skeletonLine, { width: '80%', height: 14 }]} />
+      <View style={[styles.skeletonLine, { width: '50%', height: 12, marginTop: 8 }]} />
+      <View style={[styles.skeletonLine, { width: '40%', height: 16, marginTop: 12 }]} />
+    </View>
+  </View>
+);
+
 export default function CatalogScreen() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
@@ -37,62 +49,57 @@ export default function CatalogScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [skip, setSkip] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
-  // Исправленная логика пагинации
+  // skip держим в ref — избегаем перегенерации loadProducts на каждый setState
+  const skipRef = useRef(0);
+  const loadingRef = useRef(false); // блокировка одновременных запросов
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const loadProducts = useCallback(async (reset = false) => {
-    // Если это сброс/первая загрузка — берем 0, иначе текущий skip из стейта
-    const currentSkip = reset ? 0 : skip;
-    
-    // Блокируем лишние запросы при пагинации
-    if (!reset && (isLoadingMore || !hasMore)) return;
+    if (loadingRef.current) return;
+    if (!reset && !hasMore) return;
+
+    loadingRef.current = true;
+    const currentSkip = reset ? 0 : skipRef.current;
 
     try {
-      if (reset) {
-        setIsLoading(true);
-      } else {
-        setIsLoadingMore(true);
-      }
+      if (reset) setIsLoading(true);
+      else setIsLoadingMore(true);
 
       const response = await fetch(
         `${API_URL}/api/products?skip=${currentSkip}&limit=${PAGE_SIZE}`
       );
-      const data = await response.json();
+      const data: Product[] = await response.json();
 
       if (reset) {
         setProducts(data);
-        setSkip(PAGE_SIZE); // Устанавливаем смещение для следующей страницы
-        setHasMore(data.length === PAGE_SIZE);
+        skipRef.current = data.length;
       } else {
-        setProducts(prev => [...prev, ...data]);
-        setSkip(prev => prev + PAGE_SIZE); // Сдвигаем еще на 20 элементов
-        setHasMore(data.length === PAGE_SIZE);
+        // Защита от дублей — на случай гонки запросов
+        setProducts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const fresh = data.filter(p => !existingIds.has(p.id));
+          return [...prev, ...fresh];
+        });
+        skipRef.current += data.length;
       }
+      setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось загрузить товары');
     } finally {
+      loadingRef.current = false;
       setIsLoading(false);
       setIsLoadingMore(false);
       setRefreshing(false);
     }
-  }, [skip, isLoadingMore, hasMore]);
+  }, [hasMore]);
 
-  // Безопасный вызов при переходе на экран
-  useFocusEffect(
-    useCallback(() => {
-      loadProducts(true);
-    }, [loadProducts])
-  );
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadProducts(true);
-  };
-
-  const searchProducts = async (query: string) => {
+  const searchProducts = useCallback(async (query: string) => {
     if (!query.trim()) {
-      loadProducts(true);
+      skipRef.current = 0;
+      setHasMore(true);
+      await loadProducts(true);
       return;
     }
     try {
@@ -100,21 +107,41 @@ export default function CatalogScreen() {
       const response = await fetch(
         `${API_URL}/api/products/search/text?q=${encodeURIComponent(query)}`
       );
-      const data = await response.json();
+      const data: Product[] = await response.json();
       setProducts(data);
-      setHasMore(false);
-    } catch (error) {
+      setHasMore(false); // при поиске пагинация не работает
+    } catch {
       Alert.alert('Ошибка', 'Не удалось выполнить поиск');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [loadProducts]);
 
+  // Debounce поиска — не долбим бэк на каждое нажатие клавиши
   const handleSearch = (text: string) => {
     setSearchQuery(text);
-    if (text.length > 1 || text.length === 0) {
-      searchProducts(text);
-    }
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      if (text.length > 1 || text.length === 0) {
+        searchProducts(text);
+      }
+    }, 350);
+  };
+
+  // Загрузка при первом входе на экран
+  useFocusEffect(
+    useCallback(() => {
+      skipRef.current = 0;
+      setHasMore(true);
+      loadProducts(true);
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    skipRef.current = 0;
+    setHasMore(true);
+    loadProducts(true);
   };
 
   const renderFooter = () => {
@@ -122,7 +149,6 @@ export default function CatalogScreen() {
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator size="small" color="#667eea" />
-        <Text style={styles.footerLoaderText}>Загрузка...</Text>
       </View>
     );
   };
@@ -133,13 +159,17 @@ export default function CatalogScreen() {
       <TouchableOpacity
         style={styles.productCard}
         activeOpacity={0.7}
-        onPress={() => router.push({ pathname: '/product-detail', params: { productId: item.id } })}
+        onPress={() =>
+          router.push({ pathname: '/product-detail', params: { productId: item.id } })
+        }
         testID={`product-${item.id}`}
       >
         {mainImage ? (
           <Image
             source={{
-              uri: mainImage.startsWith('http') ? mainImage : `data:image/jpeg;base64,${mainImage}`
+              uri: mainImage.startsWith('http')
+                ? mainImage
+                : `data:image/jpeg;base64,${mainImage}`,
             }}
             style={styles.productImage}
             resizeMode="cover"
@@ -156,7 +186,9 @@ export default function CatalogScreen() {
           </View>
         )}
         <View style={styles.productInfo}>
-          <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+          <Text style={styles.productName} numberOfLines={2}>
+            {item.name}
+          </Text>
           {(item.category || item.subcategory) && (
             <Text style={styles.productCategory} numberOfLines={1}>
               {[item.category, item.subcategory].filter(Boolean).join(' • ')}
@@ -170,6 +202,15 @@ export default function CatalogScreen() {
       </TouchableOpacity>
     );
   };
+
+  // Skeleton при первой загрузке (6 карточек)
+  const renderSkeletons = () => (
+    <View style={styles.skeletonGrid}>
+      {[...Array(6)].map((_, i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -207,26 +248,14 @@ export default function CatalogScreen() {
       </View>
 
       {isLoading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#667eea" />
-          <Text style={styles.loadingText}>Загрузка товаров...</Text>
-        </View>
+        renderSkeletons()
       ) : products.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="cube-outline" size={80} color="#dee2e6" />
           <Text style={styles.emptyTitle}>Товары не найдены</Text>
           <Text style={styles.emptyText}>
-            {searchQuery ? 'Попробуйте изменить запрос' : 'Добавьте первый товар в каталог'}
+            {searchQuery ? 'Попробуйте изменить запрос' : 'Каталог пока пуст'}
           </Text>
-          {!searchQuery && (
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => router.push('/add-product')}
-            >
-              <Ionicons name="add" size={20} color="white" />
-              <Text style={styles.addBtnText}>Добавить товар</Text>
-            </TouchableOpacity>
-          )}
         </View>
       ) : (
         <FlatList
@@ -241,7 +270,6 @@ export default function CatalogScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
           }
           onEndReached={() => {
-            // Запускает пагинацию (следующие 20 товаров) только при обычном просмотре каталога
             if (!searchQuery && hasMore && !isLoadingMore) {
               loadProducts(false);
             }
@@ -263,10 +291,10 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   barcodeBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
-  
+
   searchContainer: {
-    flexDirection: 'row', alignItems: 'center', 
-    backgroundColor: 'rgba(102, 126, 234, 0.08)', 
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(102, 126, 234, 0.08)',
     marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
@@ -274,18 +302,15 @@ const styles = StyleSheet.create({
   },
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontSize: 16, color: '#667eea', fontWeight: '500' },
-  
+
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
-  row: {
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-  },
+  row: { justifyContent: 'space-between', paddingHorizontal: 8 },
   productCard: {
-    backgroundColor: 'white', 
-    borderRadius: 12, 
+    backgroundColor: 'white',
+    borderRadius: 12,
     marginBottom: 12,
     width: '48%',
-    overflow: 'hidden', 
+    overflow: 'hidden',
     position: 'relative',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -307,20 +332,24 @@ const styles = StyleSheet.create({
   productCategory: { fontSize: 12, color: '#6c757d', marginBottom: 6 },
   priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' },
   productPrice: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
-  
-  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: '#6c757d' },
+
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24 },
-  addBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#667eea', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
-  },
-  addBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
   footerLoader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 16, gap: 8,
+    alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 20,
   },
-  footerLoaderText: { fontSize: 14, color: '#6c757d' },
+
+  // Skeleton styles
+  skeletonGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  skeleton: { backgroundColor: '#e9ecef' },
+  skeletonLine: {
+    backgroundColor: '#e9ecef',
+    borderRadius: 4,
+  },
 });
