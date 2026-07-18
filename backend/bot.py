@@ -3,6 +3,7 @@ import base64
 import asyncio
 import logging
 from io import BytesIO
+from typing import Optional
 
 from PIL import Image
 from aiogram import Bot, Dispatcher, F
@@ -31,8 +32,6 @@ def get_lock(chat_id: int) -> asyncio.Lock:
 def blank_state():
     return {
         "session_active": False,
-        # step: idle | photos | name | price | barcode | article | summary | edit_menu
-        #       | edit_photos | edit_name | edit_price | edit_barcode | edit_article
         "step": "idle",
         "images": [],
         "name": None,
@@ -70,7 +69,6 @@ def compress_image_bytes(raw_bytes: bytes, max_width: int = 800, quality: int = 
 
 
 def format_summary(state: dict) -> str:
-    """Готовит текст-сводку по товару для экрана подтверждения."""
     return (
         "📋 Проверьте данные товара:\n\n"
         f"📸 Фото: {len(state['images'])} шт.\n"
@@ -80,6 +78,58 @@ def format_summary(state: dict) -> str:
         f"🔖 Артикул: {state['article_number'] or '—'}\n\n"
         "Всё верно?"
     )
+
+
+# ============= Уведомление админов о новом pending-товаре =============
+
+def _parse_admin_chat_ids() -> list[int]:
+    """Читает ADMIN_CHAT_IDS из env, формат: '123,456,789'."""
+    raw = os.environ.get("ADMIN_CHAT_IDS", "").strip()
+    if not raw:
+        return []
+    ids = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.append(int(part))
+        except ValueError:
+            logger.warning(f"ADMIN_CHAT_IDS: не могу распарсить '{part}'")
+    return ids
+
+
+async def notify_admins(
+    bot: Bot,
+    name: str,
+    barcode: Optional[str],
+    first_image_url: Optional[str],
+    link: str,
+):
+    """
+    Рассылает всем админам из ADMIN_CHAT_IDS уведомление о новой заявке.
+    Если фото есть — шлёт как photo с caption, иначе просто текст.
+    """
+    admin_ids = _parse_admin_chat_ids()
+    if not admin_ids:
+        logger.info("ADMIN_CHAT_IDS не задан — уведомление не отправлено")
+        return
+
+    caption = (
+        "🆕 Новая заявка на добавление товара\n\n"
+        f"📦 {name}\n"
+        f"Штрихкод: {barcode or '—'}\n\n"
+        f"Открыть на сайте: {link}"
+    )
+
+    for chat_id in admin_ids:
+        try:
+            if first_image_url:
+                await bot.send_photo(chat_id=chat_id, photo=first_image_url, caption=caption)
+            else:
+                await bot.send_message(chat_id=chat_id, text=caption)
+        except Exception as e:
+            logger.error(f"notify_admins: не удалось отправить в {chat_id}: {e}")
 
 
 def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
@@ -140,7 +190,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     def kb_edit_photos(has_photos: bool) -> InlineKeyboardMarkup:
-        """Такой же как kb_photos, но 'Готово' ведёт обратно к summary."""
         rows = []
         if has_photos:
             rows.append([InlineKeyboardButton(text="✅ Готово", callback_data="edit_photos_done")])
@@ -169,7 +218,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
         ])
 
     def kb_cancel_edit() -> InlineKeyboardMarkup:
-        """Кнопка отмены при редактировании одного поля."""
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Отмена", callback_data="back_to_summary")],
         ])
@@ -218,7 +266,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
         if not state or not state.get("session_active"):
             await delete_user_message(message)
             return
-        # принимаем фото только на шагах где это уместно
         if state["step"] not in ("photos", "edit_photos"):
             await delete_user_message(message)
             return
@@ -254,7 +301,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
                     f"Пришлите ещё или нажмите «Готово».",
                     kb_photos(has_photos=True),
                 )
-            else:  # edit_photos
+            else:
                 await show_screen(
                     chat_id,
                     f"📸 Всего фото: {len(state['images'])} шт.\n\n"
@@ -293,11 +340,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
                 return
             state["step"] = "edit_menu"
             await query.answer()
-            await show_screen(
-                chat_id,
-                "✏️ Что хотите изменить?",
-                kb_edit_menu(),
-            )
+            await show_screen(chat_id, "✏️ Что хотите изменить?", kb_edit_menu())
 
     @dp.callback_query(F.data == "back_to_summary")
     async def cb_back_to_summary(query: CallbackQuery):
@@ -319,7 +362,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             if not state:
                 await query.answer()
                 return
-            # обнуляем старые фото, пусть загрузит заново
             state["images"] = []
             state["step"] = "edit_photos"
             await query.answer()
@@ -357,8 +399,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             await query.answer()
             await show_screen(
                 chat_id,
-                f"✏️ Текущее название: {state['name']}\n\n"
-                "Пришлите новое название сообщением.",
+                f"✏️ Текущее название: {state['name']}\n\nПришлите новое название сообщением.",
                 kb_cancel_edit(),
             )
 
@@ -374,8 +415,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             await query.answer()
             await show_screen(
                 chat_id,
-                f"💰 Текущая цена: {state['price']} ₸\n\n"
-                "Пришлите новую цену числом.",
+                f"💰 Текущая цена: {state['price']} ₸\n\nПришлите новую цену числом.",
                 kb_cancel_edit(),
             )
 
@@ -391,8 +431,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             await query.answer()
             await show_screen(
                 chat_id,
-                f"📦 Текущий штрихкод: {state['barcode'] or '—'}\n\n"
-                "Пришлите новый штрихкод сообщением.",
+                f"📦 Текущий штрихкод: {state['barcode'] or '—'}\n\nПришлите новый штрихкод сообщением.",
                 kb_cancel_edit(),
             )
 
@@ -408,8 +447,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
             await query.answer()
             await show_screen(
                 chat_id,
-                f"🔖 Текущий артикул: {state['article_number'] or '—'}\n\n"
-                "Пришлите новый артикул сообщением.",
+                f"🔖 Текущий артикул: {state['article_number'] or '—'}\n\nПришлите новый артикул сообщением.",
                 kb_cancel_edit(),
             )
 
@@ -449,7 +487,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
 
             step = state["step"]
 
-            # Обычный поток заполнения
             if step == "photos":
                 await show_screen(
                     chat_id,
@@ -482,7 +519,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
                     f"📦 Штрихкод: {text}\n\n"
                     f"🔖 Пришлите артикул сообщением.\n"
                     f"Если артикула нет — напишите «нет» или «-».",
-                    kb_cancel_edit() if False else None,  # без кнопки отмены на обычном флоу
                 )
                 return
 
@@ -492,7 +528,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
                 await show_screen(chat_id, format_summary(state), kb_summary())
                 return
 
-            # Редактирование отдельных полей
             if step == "edit_name":
                 state["name"] = text
                 state["step"] = "summary"
@@ -534,7 +569,6 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product):
                 return
 
             if step == "summary":
-                # Текст на этапе сводки — просто напомним про кнопки
                 await show_screen(chat_id, format_summary(state), kb_summary())
                 return
 
