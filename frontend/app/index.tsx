@@ -86,14 +86,14 @@ export default function HomeScreen() {
       color: ['#f093fb', '#f5576c'],
       route: '/catalog',
     },
-    {
-      id: '4',
-      title: 'Товар на рассмотрение',
-      subtitle: 'Проблемные товары',
-      icon: 'plus' as const,
-      color: ['#5500ff', '#2ce2fa'],
-      route: '/catalog',
-    },
+    // {
+    //   id: '4',
+    //   title: 'Товар на рассмотрение',
+    //   subtitle: 'Проблемные товары',
+    //   icon: 'plus' as const,
+    //   color: ['#5500ff', '#2ce2fa'],
+    //   route: '/catalog',
+    // },
   ];
 
   return (
