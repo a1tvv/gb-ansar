@@ -8,6 +8,7 @@ import {
   StatusBar,
   ScrollView,
   Platform,
+  Linking
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -165,7 +166,22 @@ export default function HomeScreen() {
               ✓ Установлено как приложение • v2.0.0
             </Text>
           ) : (
-            <Text style={styles.footerText}>Разработчик ab.dussi</Text>
+            <Text style={styles.footerText}>
+              Разработчики{' '}
+              <Text
+                style={styles.devLink}
+                onPress={() => Linking.openURL('https://instagram.com/ab.dussi')}
+              >
+                ab.dussi
+              </Text>
+              ,{' '}
+              <Text
+                style={styles.devLink}
+                onPress={() => Linking.openURL('https://instagram.com/du.z.r')}
+              >
+                du.z.r
+              </Text>
+            </Text>
           )}
         </View>
       </ScrollView>
@@ -209,4 +225,9 @@ const styles = StyleSheet.create({
   cardSubtitle: { fontSize: 14, color: 'rgba(255, 255, 255, 0.9)' },
   footer: { marginTop: 32, alignItems: 'center' },
   footerText: { fontSize: 12, color: '#adb5bd' },
+    devLink: {
+    color: '#667eea',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+},
 });
