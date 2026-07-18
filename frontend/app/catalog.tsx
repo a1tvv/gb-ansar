@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Platform,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -192,18 +191,18 @@ export default function CatalogScreen() {
       </View>
 
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#6c757d" style={styles.searchIcon} />
+        <Ionicons name="search" size={20} color="#667eea" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Поиск товаров..."
           value={searchQuery}
           onChangeText={handleSearch}
-          placeholderTextColor="#adb5bd"
+          placeholderTextColor="rgba(102, 126, 234, 0.6)"
           testID="search-input"
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => handleSearch('')}>
-            <Ionicons name="close-circle" size={20} color="#6c757d" />
+            <Ionicons name="close-circle" size={20} color="#667eea" />
           </TouchableOpacity>
         )}
       </View>
@@ -264,13 +263,18 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   barcodeBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  
+  // Обновленный фиолетовый поисковик
   searchContainer: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: 'white',
+    flexDirection: 'row', alignItems: 'center', 
+    backgroundColor: 'rgba(102, 126, 234, 0.08)', 
     marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(102, 126, 234, 0.2)',
   },
   searchIcon: { marginRight: 12 },
-  searchInput: { flex: 1, fontSize: 16, color: '#1a1a1a' },
+  searchInput: { flex: 1, fontSize: 16, color: '#667eea', fontWeight: '500' },
   
   // Сетка и карточки
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
