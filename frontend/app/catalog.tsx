@@ -119,41 +119,6 @@ export default function CatalogScreen() {
     }
   };
 
-  const deleteProduct = async () => {
-  const doDelete = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/products/${product?.id}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
-        if (Platform.OS === 'web') {
-          window.alert('Товар удалён');
-        }
-        router.back();
-      } else {
-        Alert.alert('Ошибка', 'Не удалось удалить товар');
-      }
-    } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось удалить товар');
-    }
-  };
-
-  if (Platform.OS === 'web') {
-    if (window.confirm('Вы уверены, что хотите удалить этот товар?')) {
-      doDelete();
-    }
-  } else {
-    Alert.alert(
-      'Удаление товара',
-      'Вы уверены, что хотите удалить этот товар?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Удалить', style: 'destructive', onPress: doDelete },
-      ]
-    );
-  }
-};
-  
   const renderFooter = () => {
     if (!isLoadingMore) return null;
     return (
@@ -183,25 +148,25 @@ export default function CatalogScreen() {
           />
         ) : (
           <View style={[styles.productImage, styles.noImage]}>
-            <Ionicons name="image-outline" size={48} color="#adb5bd" />
+            <Ionicons name="image-outline" size={40} color="#adb5bd" />
           </View>
         )}
         {item.images && item.images.length > 1 && (
           <View style={styles.photoCount}>
-            <Ionicons name="images" size={12} color="white" />
+            <Ionicons name="images" size={10} color="white" />
             <Text style={styles.photoCountText}>{item.images.length}</Text>
           </View>
         )}
         <View style={styles.productInfo}>
           <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
           {(item.category || item.subcategory) && (
-            <Text style={styles.productCategory}>
+            <Text style={styles.productCategory} numberOfLines={1}>
               {[item.category, item.subcategory].filter(Boolean).join(' • ')}
             </Text>
           )}
           <View style={styles.priceRow}>
             <Text style={styles.productPrice}>{item.price.toLocaleString('ru-RU')} ₸</Text>
-            <Ionicons name="chevron-forward" size={20} color="#667eea" />
+            <Ionicons name="chevron-forward" size={16} color="#667eea" />
           </View>
         </View>
       </TouchableOpacity>
@@ -270,6 +235,8 @@ export default function CatalogScreen() {
           data={products}
           renderItem={renderProductCard}
           keyExtractor={(item) => item.id}
+          numColumns={2}
+          columnWrapperStyle={styles.row}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -304,25 +271,42 @@ const styles = StyleSheet.create({
   },
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontSize: 16, color: '#1a1a1a' },
-  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
-  productCard: {
-    backgroundColor: 'white', borderRadius: 16, marginBottom: 16,
-    overflow: 'hidden', position: 'relative',
+  
+  // Сетка и карточки
+  listContent: { paddingHorizontal: 8, paddingBottom: 24 },
+  row: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
   },
-  productImage: { width: '100%', height: 400, backgroundColor: '#f8f9fa' },
+  productCard: {
+    backgroundColor: 'white', 
+    borderRadius: 12, 
+    marginBottom: 12,
+    width: '48%',
+    overflow: 'hidden', 
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  productImage: { width: '100%', height: 185, backgroundColor: '#f8f9fa' },
   noImage: { alignItems: 'center', justifyContent: 'center' },
   photoCount: {
-    position: 'absolute', top: 12, right: 12,
+    position: 'absolute', top: 8, right: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
   },
-  photoCountText: { color: 'white', fontSize: 12, fontWeight: '600' },
-  productInfo: { padding: 16 },
-  productName: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
-  productCategory: { fontSize: 14, color: '#6c757d', marginBottom: 8 },
-  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  productPrice: { fontSize: 20, fontWeight: 'bold', color: '#667eea' },
+  photoCountText: { color: 'white', fontSize: 10, fontWeight: '600' },
+  productInfo: { padding: 10, flex: 1, justifyContent: 'space-between' },
+  productName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', marginBottom: 4 },
+  productCategory: { fontSize: 12, color: '#6c757d', marginBottom: 6 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' },
+  productPrice: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
+  
+  // Системные контейнеры
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { marginTop: 16, fontSize: 16, color: '#6c757d' },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
