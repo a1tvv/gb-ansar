@@ -342,6 +342,48 @@ async def get_products(
         result.append(Product(**doc))
     return result
 
+@api_router.get("/products/paged")
+async def get_products_paged(
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20
+):
+    """
+    Пагинация с номерами страниц.
+    Возвращает {items, total, page, pages, limit}.
+    """
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 100:
+        limit = 20
+
+    query = {}
+    if category:
+        query["category"] = category
+    if subcategory:
+        query["subcategory"] = subcategory
+
+    total = await db.products.count_documents(query)
+    pages = (total + limit - 1) // limit  # округление вверх
+
+    skip = (page - 1) * limit
+    docs = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    items = []
+    for p in docs:
+        doc = product_doc_to_model(p)
+        if doc.get('images') and len(doc['images']) > 1:
+            doc['images'] = [doc['images'][0]]
+        items.append(Product(**doc))
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "limit": limit,
+    }
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
