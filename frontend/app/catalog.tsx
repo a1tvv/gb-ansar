@@ -30,7 +30,6 @@ interface Product {
   images: string[];
 }
 
-// Skeleton-плейсхолдер вместо серого экрана
 const SkeletonCard = () => (
   <View style={styles.productCard}>
     <View style={[styles.productImage, styles.skeleton]} />
@@ -42,64 +41,70 @@ const SkeletonCard = () => (
   </View>
 );
 
+/**
+ * Google-style пагинатор: показывает окно [current-2 ... current+2],
+ * плюс всегда первая и последняя страница с многоточиями если нужно.
+ */
+function getPageNumbers(current: number, total: number): (number | 'dots')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages: (number | 'dots')[] = [];
+  pages.push(1);
+  if (current > 3) pages.push('dots');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (current < total - 2) pages.push('dots');
+  pages.push(total);
+  return pages;
+}
+
 export default function CatalogScreen() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
 
-  // skip держим в ref — избегаем перегенерации loadProducts на каждый setState
-  const skipRef = useRef(0);
-  const loadingRef = useRef(false); // блокировка одновременных запросов
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
+  const flatListRef = useRef<FlatList>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingRef = useRef(false);
 
-  const loadProducts = useCallback(async (reset = false) => {
+  const loadPage = useCallback(async (pageNum: number) => {
     if (loadingRef.current) return;
-    if (!reset && !hasMore) return;
-
     loadingRef.current = true;
-    const currentSkip = reset ? 0 : skipRef.current;
 
     try {
-      if (reset) setIsLoading(true);
-      else setIsLoadingMore(true);
-
+      setIsLoading(true);
       const response = await fetch(
-        `${API_URL}/api/products?skip=${currentSkip}&limit=${PAGE_SIZE}`
+        `${API_URL}/api/products/paged?page=${pageNum}&limit=${PAGE_SIZE}`
       );
-      const data: Product[] = await response.json();
+      const data = await response.json();
 
-      if (reset) {
-        setProducts(data);
-        skipRef.current = data.length;
-      } else {
-        // Защита от дублей — на случай гонки запросов
-        setProducts(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const fresh = data.filter(p => !existingIds.has(p.id));
-          return [...prev, ...fresh];
-        });
-        skipRef.current += data.length;
-      }
-      setHasMore(data.length === PAGE_SIZE);
+      setProducts(data.items || []);
+      setPage(data.page || pageNum);
+      setTotalPages(data.pages || 1);
+      setTotalItems(data.total || 0);
+
+      // прокрутка списка наверх при смене страницы
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось загрузить товары');
     } finally {
       loadingRef.current = false;
       setIsLoading(false);
-      setIsLoadingMore(false);
       setRefreshing(false);
     }
-  }, [hasMore]);
+  }, []);
 
   const searchProducts = useCallback(async (query: string) => {
     if (!query.trim()) {
-      skipRef.current = 0;
-      setHasMore(true);
-      await loadProducts(true);
+      loadPage(1);
       return;
     }
     try {
@@ -107,17 +112,18 @@ export default function CatalogScreen() {
       const response = await fetch(
         `${API_URL}/api/products/search/text?q=${encodeURIComponent(query)}`
       );
-      const data: Product[] = await response.json();
+      const data = await response.json();
       setProducts(data);
-      setHasMore(false); // при поиске пагинация не работает
+      setTotalPages(1);
+      setTotalItems(data.length);
+      setPage(1);
     } catch {
       Alert.alert('Ошибка', 'Не удалось выполнить поиск');
     } finally {
       setIsLoading(false);
     }
-  }, [loadProducts]);
+  }, [loadPage]);
 
-  // Debounce поиска — не долбим бэк на каждое нажатие клавиши
   const handleSearch = (text: string) => {
     setSearchQuery(text);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -128,29 +134,20 @@ export default function CatalogScreen() {
     }, 350);
   };
 
-  // Загрузка при первом входе на экран
   useFocusEffect(
     useCallback(() => {
-      skipRef.current = 0;
-      setHasMore(true);
-      loadProducts(true);
+      loadPage(1);
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    skipRef.current = 0;
-    setHasMore(true);
-    loadProducts(true);
+    loadPage(page);
   };
 
-  const renderFooter = () => {
-    if (!isLoadingMore) return null;
-    return (
-      <View style={styles.footerLoader}>
-        <ActivityIndicator size="small" color="#667eea" />
-      </View>
-    );
+  const goToPage = (p: number) => {
+    if (p === page || p < 1 || p > totalPages) return;
+    loadPage(p);
   };
 
   const renderProductCard = ({ item }: { item: Product }) => {
@@ -203,7 +200,6 @@ export default function CatalogScreen() {
     );
   };
 
-  // Skeleton при первой загрузке (6 карточек)
   const renderSkeletons = () => (
     <View style={styles.skeletonGrid}>
       {[...Array(6)].map((_, i) => (
@@ -211,6 +207,58 @@ export default function CatalogScreen() {
       ))}
     </View>
   );
+
+  const renderPagination = () => {
+    // при поиске пагинатор не показываем
+    if (searchQuery.trim() || totalPages <= 1) return null;
+
+    const pages = getPageNumbers(page, totalPages);
+
+    return (
+      <View style={styles.paginationWrap}>
+        <Text style={styles.paginationInfo}>
+          Показано {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalItems)} из {totalItems}
+        </Text>
+        <View style={styles.paginationRow}>
+          <TouchableOpacity
+            style={[styles.pageBtn, page === 1 && styles.pageBtnDisabled]}
+            onPress={() => goToPage(page - 1)}
+            disabled={page === 1}
+          >
+            <Ionicons name="chevron-back" size={18} color={page === 1 ? '#adb5bd' : '#667eea'} />
+          </TouchableOpacity>
+
+          {pages.map((p, idx) =>
+            p === 'dots' ? (
+              <Text key={`dots-${idx}`} style={styles.pageDots}>…</Text>
+            ) : (
+              <TouchableOpacity
+                key={p}
+                style={[styles.pageBtn, p === page && styles.pageBtnActive]}
+                onPress={() => goToPage(p)}
+              >
+                <Text style={[styles.pageBtnText, p === page && styles.pageBtnTextActive]}>
+                  {p}
+                </Text>
+              </TouchableOpacity>
+            )
+          )}
+
+          <TouchableOpacity
+            style={[styles.pageBtn, page === totalPages && styles.pageBtnDisabled]}
+            onPress={() => goToPage(page + 1)}
+            disabled={page === totalPages}
+          >
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={page === totalPages ? '#adb5bd' : '#667eea'}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -259,6 +307,7 @@ export default function CatalogScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={products}
           renderItem={renderProductCard}
           keyExtractor={(item) => item.id}
@@ -269,13 +318,7 @@ export default function CatalogScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
           }
-          onEndReached={() => {
-            if (!searchQuery && hasMore && !isLoadingMore) {
-              loadProducts(false);
-            }
-          }}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={renderFooter}
+          ListFooterComponent={renderPagination}
         />
       )}
     </SafeAreaView>
@@ -296,9 +339,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(102, 126, 234, 0.08)',
     marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(102, 126, 234, 0.2)',
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(102, 126, 234, 0.2)',
   },
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontSize: 16, color: '#667eea', fontWeight: '500' },
@@ -306,17 +347,10 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
   row: { justifyContent: 'space-between', paddingHorizontal: 8 },
   productCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    marginBottom: 12,
-    width: '48%',
-    overflow: 'hidden',
-    position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    backgroundColor: 'white', borderRadius: 12, marginBottom: 12,
+    width: '48%', overflow: 'hidden', position: 'relative',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
   productImage: { width: '100%', height: 185, backgroundColor: '#f8f9fa' },
   noImage: { alignItems: 'center', justifyContent: 'center' },
@@ -336,20 +370,46 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24 },
-  footerLoader: {
+
+  // Pagination
+  paginationWrap: {
+    paddingVertical: 20, alignItems: 'center', gap: 12,
+  },
+  paginationInfo: {
+    fontSize: 12, color: '#6c757d',
+  },
+  paginationRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+    justifyContent: 'center', paddingHorizontal: 8,
+  },
+  pageBtn: {
+    minWidth: 36, height: 36, borderRadius: 8,
+    backgroundColor: 'white',
+    borderWidth: 1, borderColor: 'rgba(102, 126, 234, 0.2)',
     alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 20,
+    paddingHorizontal: 10,
+  },
+  pageBtnActive: {
+    backgroundColor: '#667eea', borderColor: '#667eea',
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+  },
+  pageBtnText: {
+    fontSize: 14, fontWeight: '600', color: '#667eea',
+  },
+  pageBtnTextActive: {
+    color: 'white',
+  },
+  pageDots: {
+    fontSize: 16, color: '#adb5bd', paddingHorizontal: 4,
   },
 
-  // Skeleton styles
+  // Skeleton
   skeletonGrid: {
     flexDirection: 'row', flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    justifyContent: 'space-between', paddingHorizontal: 16,
   },
   skeleton: { backgroundColor: '#e9ecef' },
-  skeletonLine: {
-    backgroundColor: '#e9ecef',
-    borderRadius: 4,
-  },
+  skeletonLine: { backgroundColor: '#e9ecef', borderRadius: 4 },
 });
