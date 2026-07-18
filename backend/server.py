@@ -364,6 +364,7 @@ async def search_by_photo(request: PhotoSearchRequest):
         if "," in img_base64:
             img_base64 = img_base64.split(",")[1]
 
+        # ШАГ 1: ИИ называет предмет
         messages = [{
             "role": "user",
             "content": [
@@ -379,7 +380,7 @@ async def search_by_photo(request: PhotoSearchRequest):
         logging.info(f"AI recognized: {ai_keyword}")
 
         if not ai_keyword:
-            return SearchResponse(products=[], confidence="no_match", ai_analysis="Не удалось распознать ИИ")
+            return SearchResponse(products=[], confidence="no_match", ai_analysis="Не удалось распознать товар")
 
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
@@ -390,62 +391,78 @@ async def search_by_photo(request: PhotoSearchRequest):
                 {"keywords": {"$regex": first_word, "$options": "i"}}
             ]
         }
-
         matched_docs = await db.products.find(regex_query).to_list(20)
 
         if not matched_docs:
-            return SearchResponse(products=[], confidence="low", ai_analysis=f"Распознано как '{clean_keyword}', но в базе не найдено")
-
-        if len(matched_docs) == 1:
             return SearchResponse(
-                products=[Product(**product_doc_to_model(matched_docs[0]))],
-                confidence="high",
-                ai_analysis=f"Распознано: {clean_keyword}"
+                products=[],
+                confidence="not_found",
+                ai_analysis=f"Товара «{clean_keyword}» нет в каталоге"
             )
 
+        # ШАГ 2: всегда визуально сравниваем с эталонами (даже если кандидат один)
+        # ИИ должен подтвердить что это тот самый товар, а не просто похожий
         content = [{
             "type": "text",
             "text": (
-                "На ПЕРВОМ фото — товар который сфотографировал кассир. "
-                "Далее идут эталонные фото товаров из каталога, каждое пронумеровано. "
-                "Сравни первое фото с эталонами и определи какой товар на нём. "
-                "Ответь ТОЛЬКО номером эталона (например: 2). Если ни один не подходит — 0."
+                "На ПЕРВОМ фото — товар, сфотографированный кассиром. "
+                "Далее идут эталонные фото товаров из каталога с их номерами.\n\n"
+                "Твоя задача: определить какой ИМЕННО из эталонов на первом фото. "
+                "Сравнивай форму, упаковку, надписи, бренд, размер — форма важнее цвета.\n\n"
+                "ВАЖНО: если ни один эталон не совпадает уверенно с фото кассира — верни 0. "
+                "Лучше честный 0, чем случайное угадывание.\n\n"
+                "ФОРМАТ ОТВЕТА — ТОЛЬКО ОДНА ЦИФРА (номер эталона или 0). Без пояснений."
             )
         }]
 
+        content.append({"type": "text", "text": "ФОТО_КАССИРА:"})
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
         })
 
+        candidates_with_images = []
         for i, p in enumerate(matched_docs):
             imgs = p.get("images") or []
             if imgs:
+                candidates_with_images.append(p)
                 content.append({
                     "type": "text",
-                    "text": f"Эталон #{i+1} — {p['name']}:"
+                    "text": f"ЭТАЛОН #{len(candidates_with_images)} — {p['name']}:"
                 })
                 content.append({
                     "type": "image_url",
                     "image_url": {"url": imgs[0]}
                 })
 
-        refine_messages = [{"role": "user", "content": content}]
-        refine_result = await call_openrouter(refine_messages)
+        # Если ни у одного кандидата нет фото — сравнивать не с чем
+        if not candidates_with_images:
+            return SearchResponse(
+                products=[],
+                confidence="not_found",
+                ai_analysis=f"Не удалось сравнить с эталонами"
+            )
+
+        refine_result = await call_openrouter([{"role": "user", "content": content}])
         logging.info(f"AI refined: {refine_result}")
 
         match = re.search(r'\d+', refine_result)
         if match:
             idx = int(match.group()) - 1
-            if 0 <= idx < len(matched_docs):
+            if 0 <= idx < len(candidates_with_images):
+                chosen = candidates_with_images[idx]
                 return SearchResponse(
-                    products=[Product(**product_doc_to_model(matched_docs[idx]))],
+                    products=[Product(**product_doc_to_model(chosen))],
                     confidence="high",
-                    ai_analysis=f"Распознано: {matched_docs[idx]['name']}"
+                    ai_analysis=f"Распознано: {chosen['name']}"
                 )
 
-        products_list = [Product(**product_doc_to_model(p)) for p in matched_docs]
-        return SearchResponse(products=products_list, confidence="medium", ai_analysis=f"Найдено несколько: {clean_keyword}")
+        # ИИ вернул 0 или что-то невалидное — товар не найден
+        return SearchResponse(
+            products=[],
+            confidence="not_found",
+            ai_analysis=f"Похожего товара «{clean_keyword}» нет в каталоге"
+        )
 
     except Exception as e:
         logging.error(f"Error in photo search: {str(e)}")

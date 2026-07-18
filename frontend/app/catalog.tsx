@@ -40,8 +40,12 @@ export default function CatalogScreen() {
   const [skip, setSkip] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
+  // Исправленная логика пагинации
   const loadProducts = useCallback(async (reset = false) => {
+    // Если это сброс/первая загрузка — берем 0, иначе текущий skip из стейта
     const currentSkip = reset ? 0 : skip;
+    
+    // Блокируем лишние запросы при пагинации
     if (!reset && (isLoadingMore || !hasMore)) return;
 
     try {
@@ -58,13 +62,13 @@ export default function CatalogScreen() {
 
       if (reset) {
         setProducts(data);
-        setSkip(PAGE_SIZE);
+        setSkip(PAGE_SIZE); // Устанавливаем смещение для следующей страницы
+        setHasMore(data.length === PAGE_SIZE);
       } else {
         setProducts(prev => [...prev, ...data]);
-        setSkip(prev => prev + PAGE_SIZE);
+        setSkip(prev => prev + PAGE_SIZE); // Сдвигаем еще на 20 элементов
+        setHasMore(data.length === PAGE_SIZE);
       }
-
-      setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось загрузить товары');
     } finally {
@@ -74,25 +78,20 @@ export default function CatalogScreen() {
     }
   }, [skip, isLoadingMore, hasMore]);
 
+  // Безопасный вызов при переходе на экран
   useFocusEffect(
     useCallback(() => {
-      setSkip(0);
-      setHasMore(true);
       loadProducts(true);
-    }, [])
+    }, [loadProducts])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    setSkip(0);
-    setHasMore(true);
     loadProducts(true);
   };
 
   const searchProducts = async (query: string) => {
     if (!query.trim()) {
-      setSkip(0);
-      setHasMore(true);
       loadProducts(true);
       return;
     }
@@ -242,6 +241,7 @@ export default function CatalogScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
           }
           onEndReached={() => {
+            // Запускает пагинацию (следующие 20 товаров) только при обычном просмотре каталога
             if (!searchQuery && hasMore && !isLoadingMore) {
               loadProducts(false);
             }
@@ -264,7 +264,6 @@ const styles = StyleSheet.create({
   barcodeBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
   
-  // Обновленный фиолетовый поисковик
   searchContainer: {
     flexDirection: 'row', alignItems: 'center', 
     backgroundColor: 'rgba(102, 126, 234, 0.08)', 
@@ -276,7 +275,6 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontSize: 16, color: '#667eea', fontWeight: '500' },
   
-  // Сетка и карточки
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
   row: {
     justifyContent: 'space-between',
@@ -310,7 +308,6 @@ const styles = StyleSheet.create({
   priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' },
   productPrice: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
   
-  // Системные контейнеры
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { marginTop: 16, fontSize: 16, color: '#6c757d' },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
