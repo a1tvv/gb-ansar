@@ -67,36 +67,6 @@ export default function ProductDetailScreen() {
     }, [params.productId, loadProduct])
   );
 
-  const deleteProduct = async () => {
-    Alert.alert(
-      'Удаление товара',
-      'Вы уверены, что хотите удалить этот товар?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const response = await fetch(`${API_URL}/api/products/${product?.id}`, {
-                method: 'DELETE',
-              });
-              if (response.ok) {
-                Alert.alert('Успешно', 'Товар удалён', [
-                  { text: 'OK', onPress: () => router.back() },
-                ]);
-              } else {
-                Alert.alert('Ошибка', 'Не удалось удалить товар');
-              }
-            } catch (error) {
-              Alert.alert('Ошибка', 'Не удалось удалить товар');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const onImageScroll = (event: any) => {
     const index = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
     setCurrentImageIndex(index);
@@ -193,19 +163,6 @@ export default function ProductDetailScreen() {
             <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={() =>
-                  router.push({ pathname: '/edit-product', params: { productId: product.id } })
-                }
-              >
-                <Ionicons name="create-outline" size={24} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerBtn} onPress={deleteProduct}>
-                <Ionicons name="trash-outline" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
           </SafeAreaView>
         </View>
 
@@ -305,7 +262,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     alignItems: 'center', justifyContent: 'center',
   },
-  headerActions: { flexDirection: 'row', gap: 12 },
   pagination: {
     position: 'absolute', bottom: 16, left: 0, right: 0,
     flexDirection: 'row', justifyContent: 'center', gap: 6,
@@ -357,7 +313,6 @@ const styles = StyleSheet.create({
   aiTitle: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
   aiText: { fontSize: 14, color: '#495057', lineHeight: 20 },
 
-  // Модалка
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center', alignItems: 'center', padding: 24,
