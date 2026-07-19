@@ -14,6 +14,20 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import React, { useState } from 'react';
+import WelcomeScreen from './WelcomeScreen'; // путь к файлу
+import CatalogScreen from './CatalogScreen'; // твой текущий каталог
+
+export default function App() {
+  const [isAppReady, setIsAppReady] = useState(false);
+
+  if (!isAppReady) {
+    return <WelcomeScreen onAnimationEnd={() => setIsAppReady(true)} />;
+  }
+
+  return <CatalogScreen />;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const [showInstallBanner, setShowInstallBanner] = useState(false);
