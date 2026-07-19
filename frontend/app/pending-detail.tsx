@@ -12,6 +12,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Share, // <-- 1. Импортируем Share
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -89,10 +90,31 @@ export default function PendingDetailScreen() {
         Alert.alert('Ошибка', 'Заявка не найдена');
         router.back();
       } finally {
-        setLoading(false);
+        Loading(false);
       }
     })();
   }, [id]);
+
+  // 2. Функция для кнопки «Поделиться»
+  const sharePendingProduct = async () => {
+    if (!pending) return;
+    try {
+      const messageParts = [
+        `📋 Заявка на товар в Grand Bazaar`,
+        name.trim() ? `Название: ${name.trim()}` : `Название: ${pending.name || 'Не указано'}`,
+        price ? `Предлагаемая цена: ${price} ₸` : null,
+        barcode.trim() ? `Штрихкод: ${barcode.trim()}` : null,
+        articleNumber.trim() ? `Артикул: ${articleNumber.trim()}` : null,
+        pending.note ? `Комментарий кассира: ${pending.note}` : null,
+      ].filter(Boolean);
+
+      await Share.share({
+        message: messageParts.join('\n'),
+      });
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось поделиться');
+    }
+  };
 
   const pickImage = async () => {
     if (newImages.length >= 5) {
@@ -203,11 +225,16 @@ export default function PendingDetailScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
         </TouchableOpacity>
+        
         <Text style={styles.title}>Оформить заявку</Text>
-        <View style={{ width: 40 }} />
+        
+        {/* 3. Меняем пустой View на кнопку «Поделиться» */}
+        <TouchableOpacity style={styles.headerBtn} onPress={sharePendingProduct}>
+          <Ionicons name="share-social-outline" size={24} color="#667eea" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -325,7 +352,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 16, backgroundColor: 'white',
   },
-  backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  // 4. Переименовали backBtn в универсальный headerBtn, чтобы кнопка «Поделиться» была симметричной
+  headerBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scrollContent: { padding: 16, paddingBottom: 40 },
