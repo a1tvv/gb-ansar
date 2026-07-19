@@ -14,21 +14,23 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import React, { useState } from 'react';
-import WelcomeScreen from './WelcomeScreen'; // путь к файлу
-import CatalogScreen from './CatalogScreen'; // твой текущий каталог
+import WelcomeScreen from './WelcomeScreen'; // путь к файлу приветствия
 
+// Единственный export default для этого файла
 export default function App() {
   const [isAppReady, setIsAppReady] = useState(false);
 
+  // Пока приложение не готово, показываем WelcomeScreen
   if (!isAppReady) {
     return <WelcomeScreen onAnimationEnd={() => setIsAppReady(true)} />;
   }
 
-  return <CatalogScreen />;
+  // Когда готово — показываем главный экран навигации
+  return <HomeScreen />;
 }
 
-export default function HomeScreen() {
+// Убрали export default, теперь это просто внутренний компонент
+function HomeScreen() {
   const router = useRouter();
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -239,9 +241,9 @@ const styles = StyleSheet.create({
   cardSubtitle: { fontSize: 14, color: 'rgba(255, 255, 255, 0.9)' },
   footer: { marginTop: 32, alignItems: 'center' },
   footerText: { fontSize: 12, color: '#adb5bd' },
-    devLink: {
+  devLink: {
     color: '#667eea',
     fontWeight: '600',
     textDecorationLine: 'underline',
-},
+  },
 });
