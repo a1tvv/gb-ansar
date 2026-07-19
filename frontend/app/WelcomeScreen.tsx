@@ -65,7 +65,7 @@ export default function WelcomeScreen({ onAnimationEnd }: WelcomeScreenProps) {
           },
         ]}
       >
-        <Text style={styles.loaderText}>Разработчики Зайд,Абдурахим</Text>
+        <Text style={styles.loaderText}>Разработчики Абдурахим, Зайд</Text>
         <View style={styles.progressBar}>
           <Animated.View style={styles.progressLine} />
         </View>
