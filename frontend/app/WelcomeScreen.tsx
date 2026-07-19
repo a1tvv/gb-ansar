@@ -53,7 +53,7 @@ export default function WelcomeScreen({ onAnimationEnd }: WelcomeScreenProps) {
         ]}
       >
         {/* Здесь может быть твоя SVG-иконка или картинка */}
-        <Text style={styles.logoText}>Grand Bazaar</Text>
+        <Text style={styles.logoText}>Ansar HomeWear</Text>
       </Animated.View>
 
       <Animated.View
@@ -65,7 +65,7 @@ export default function WelcomeScreen({ onAnimationEnd }: WelcomeScreenProps) {
           },
         ]}
       >
-        <Text style={styles.loaderText}>Загрузка каталога...</Text>
+        <Text style={styles.loaderText}>Разработчики Зайд,Абдурахим</Text>
         <View style={styles.progressBar}>
           <Animated.View style={styles.progressLine} />
         </View>
