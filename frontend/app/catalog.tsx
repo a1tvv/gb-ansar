@@ -204,6 +204,7 @@ export default function CatalogScreen() {
       ))}
     </View>
   );
+  
 
   const renderPagination = () => {
     if (searchQuery.trim() || totalPages <= 1) return null;
