@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -52,12 +52,25 @@ async function compressBase64(base64: string, maxWidth = 800, quality = 0.6): Pr
 
 export default function SubmitPendingScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ prefillName?: string; prefillImage?: string }>();
+
   const [images, setImages] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [barcode, setBarcode] = useState('');
   const [articleNumber, setArticleNumber] = useState('');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Предзаполнение из camera.tsx — если пришли параметры, заранее подставляем
+  useEffect(() => {
+    if (params.prefillName && typeof params.prefillName === 'string') {
+      setName(params.prefillName);
+    }
+    if (params.prefillImage && typeof params.prefillImage === 'string') {
+      setImages([params.prefillImage]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pickImage = async () => {
     if (images.length >= 5) {
@@ -75,7 +88,7 @@ export default function SubmitPendingScreen() {
         const compressed = await compressBase64(result.assets[0].base64);
         setImages((prev) => [...prev, compressed]);
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Ошибка', 'Не удалось загрузить фото');
     }
   };
@@ -115,7 +128,7 @@ export default function SubmitPendingScreen() {
         Alert.alert('Готово', 'Заявка отправлена! Админ склада её проверит.');
       }
       router.back();
-    } catch (e) {
+    } catch {
       Alert.alert('Ошибка', 'Не удалось отправить заявку. Попробуйте ещё раз.');
     } finally {
       setSubmitting(false);
@@ -226,10 +239,7 @@ const styles = StyleSheet.create({
     fontSize: 14, color: '#6c757d', marginBottom: 20, lineHeight: 20,
     backgroundColor: '#e7f0ff', padding: 12, borderRadius: 12,
   },
-  label: {
-    fontSize: 14, fontWeight: '600', color: '#1a1a1a',
-    marginTop: 16, marginBottom: 8,
-  },
+  label: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', marginTop: 16, marginBottom: 8 },
   input: {
     backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
     fontSize: 16, color: '#1a1a1a',

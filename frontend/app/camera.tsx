@@ -9,6 +9,9 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
+  ScrollView,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -18,15 +21,14 @@ import * as Linking from 'expo-linking';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-// Сжимает base64-картинку через canvas: ресайз до maxWidth и JPEG качество.
-// Работает на web. На нативе просто возвращает исходник (там quality уже задан камерой).
+// Сжатие фото через canvas на web
 async function compressBase64(base64: string, maxWidth = 800, quality = 0.6): Promise<string> {
   if (Platform.OS !== 'web' || typeof document === 'undefined') {
     return base64;
   }
   return new Promise((resolve) => {
     try {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         const scale = Math.min(1, maxWidth / img.width);
         const w = Math.round(img.width * scale);
@@ -51,12 +53,30 @@ async function compressBase64(base64: string, maxWidth = 800, quality = 0.6): Pr
   });
 }
 
+interface SearchProduct {
+  id: string;
+  name: string;
+  price: number;
+  images: string[];
+  barcode?: string;
+}
+
 export default function CameraScreen() {
   const router = useRouter();
   const cameraRef = useRef<any>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+
+  // Экран выбора когда несколько кандидатов
+  const [showChoice, setShowChoice] = useState(false);
+  const [choiceProducts, setChoiceProducts] = useState<SearchProduct[]>([]);
+  const [choiceRecognized, setChoiceRecognized] = useState<string | null>(null);
+
+  // Экран "не найдено"
+  const [showNotFound, setShowNotFound] = useState(false);
+  const [notFoundRecognized, setNotFoundRecognized] = useState<string | null>(null);
+  const [notFoundImage, setNotFoundImage] = useState<string | null>(null);
 
   if (!permission) {
     return (
@@ -79,7 +99,6 @@ export default function CameraScreen() {
             <TouchableOpacity
               style={styles.permissionButton}
               onPress={() => Linking.openSettings()}
-              testID="open-settings-btn"
             >
               <Text style={styles.permissionButtonText}>Открыть настройки</Text>
             </TouchableOpacity>
@@ -87,7 +106,6 @@ export default function CameraScreen() {
             <TouchableOpacity
               style={styles.permissionButton}
               onPress={requestPermission}
-              testID="request-permission-btn"
             >
               <Text style={styles.permissionButtonText}>Разрешить доступ</Text>
             </TouchableOpacity>
@@ -115,7 +133,6 @@ export default function CameraScreen() {
       const compressed = await compressBase64(photo.base64);
       await searchProduct(compressed);
     } catch (error) {
-      console.error('Error taking picture:', error);
       Alert.alert('Ошибка', 'Не удалось сделать фото');
       setIsLoading(false);
     }
@@ -149,49 +166,182 @@ export default function CameraScreen() {
         body: JSON.stringify({ image_base64: base64Image }),
       });
       const data = await response.json();
+      setIsLoading(false);
 
-      if (data.products && data.products.length > 0) {
+      const products: SearchProduct[] = data.products || [];
+      const recognized: string | null = data.recognized_name || null;
+
+      if (products.length === 0) {
+        // Товар не найден — показываем экран с кнопкой "отправить на рассмотрение"
+        setNotFoundRecognized(recognized);
+        setNotFoundImage(base64Image);
+        setShowNotFound(true);
+        return;
+      }
+
+      if (products.length === 1) {
+        // Один кандидат — сразу открываем карточку
         router.replace({
           pathname: '/product-detail',
-          params: { productId: data.products[0].id },
+          params: { productId: products[0].id },
         });
-      } else {
-        const aiInfo = data.ai_analysis
-          ? `\n\nAI увидел:\n${data.ai_analysis.substring(0, 200)}`
-          : '';
-        Alert.alert(
-          'Товар не найден',
-          `Не удалось найти подходящий товар в каталоге.${aiInfo}\n\n💡 Совет: фотографируйте товар на чистом фоне.`,
-          [
-            { text: 'OK', onPress: () => setIsLoading(false) },
-            {
-              text: 'Добавить в каталог',
-              onPress: () => {
-                setIsLoading(false);
-                router.replace('/add-product');
-              },
-            },
-          ]
-        );
+        return;
       }
+
+      // Несколько кандидатов — показываем экран выбора
+      setChoiceProducts(products);
+      setChoiceRecognized(recognized);
+      setShowChoice(true);
     } catch (error) {
-      console.error('Error searching product:', error);
       Alert.alert('Ошибка', 'Не удалось выполнить поиск');
       setIsLoading(false);
     }
   };
 
+  const goToPendingForm = () => {
+    setShowNotFound(false);
+    // Передаём распознанное название и фото, чтобы кассир не вводил заново
+    router.push({
+      pathname: '/submit-pending',
+      params: {
+        prefillName: notFoundRecognized || '',
+        prefillImage: notFoundImage || '',
+      },
+    });
+  };
+
+  const pickChoice = (productId: string) => {
+    setShowChoice(false);
+    router.replace({
+      pathname: '/product-detail',
+      params: { productId },
+    });
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* ==== ЭКРАН ВЫБОРА КОГДА НЕСКОЛЬКО КАНДИДАТОВ ==== */}
+      <Modal visible={showChoice} animationType="slide" onRequestClose={() => setShowChoice(false)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              style={styles.modalBack}
+              onPress={() => setShowChoice(false)}
+            >
+              <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>Найдено несколько</Text>
+              {choiceRecognized && (
+                <Text style={styles.modalSubtitle}>Распознано: {choiceRecognized}</Text>
+              )}
+            </View>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <Text style={styles.hintText}>
+              AI нашёл {choiceProducts.length} похожих товаров. Выберите нужный:
+            </Text>
+            {choiceProducts.map((p) => {
+              const img = p.images && p.images[0];
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={styles.choiceCard}
+                  onPress={() => pickChoice(p.id)}
+                  activeOpacity={0.8}
+                >
+                  {img ? (
+                    <Image
+                      source={{
+                        uri: img.startsWith('http') ? img : `data:image/jpeg;base64,${img}`,
+                      }}
+                      style={styles.choiceImage}
+                    />
+                  ) : (
+                    <View style={[styles.choiceImage, styles.choiceImageEmpty]}>
+                      <Ionicons name="image-outline" size={32} color="#adb5bd" />
+                    </View>
+                  )}
+                  <View style={styles.choiceInfo}>
+                    <Text style={styles.choiceName} numberOfLines={2}>{p.name}</Text>
+                    <Text style={styles.choicePrice}>{p.price.toLocaleString('ru-RU')} ₸</Text>
+                    {p.barcode && (
+                      <Text style={styles.choiceBarcode}>Штрихкод: {p.barcode}</Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={22} color="#667eea" />
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={styles.pendingCta}
+              onPress={() => {
+                setShowChoice(false);
+                setNotFoundRecognized(choiceRecognized);
+                router.push({
+                  pathname: '/submit-pending',
+                  params: { prefillName: choiceRecognized || '' },
+                });
+              }}
+            >
+              <Ionicons name="send" size={18} color="white" />
+              <Text style={styles.pendingCtaText}>Нет нужного? Отправить на рассмотрение</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ==== ЭКРАН "НЕ НАЙДЕНО" ==== */}
+      <Modal visible={showNotFound} animationType="slide" onRequestClose={() => setShowNotFound(false)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              style={styles.modalBack}
+              onPress={() => setShowNotFound(false)}
+            >
+              <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Товар не найден</Text>
+          </View>
+          <View style={styles.notFoundBody}>
+            <View style={styles.notFoundIconWrap}>
+              <Ionicons name="alert-circle" size={80} color="#f5576c" />
+            </View>
+            <Text style={styles.notFoundTitle}>
+              Этого товара нет в каталоге
+            </Text>
+            {notFoundRecognized && (
+              <Text style={styles.notFoundHint}>
+                AI распознал как: «{notFoundRecognized}»
+              </Text>
+            )}
+            <Text style={styles.notFoundDescription}>
+              Отправьте товар на рассмотрение — админ склада проверит и добавит его в каталог.
+            </Text>
+
+            <TouchableOpacity style={styles.notFoundCta} onPress={goToPendingForm}>
+              <Ionicons name="send" size={20} color="white" />
+              <Text style={styles.notFoundCtaText}>Отправить на рассмотрение</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.notFoundSecondary}
+              onPress={() => setShowNotFound(false)}
+            >
+              <Text style={styles.notFoundSecondaryText}>Попробовать ещё раз</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ==== КАМЕРА ==== */}
       <CameraView style={styles.camera} ref={cameraRef} facing="back">
         <SafeAreaView style={styles.cameraOverlay}>
           <View style={styles.topBar}>
-            <TouchableOpacity
-              style={styles.backBtn}
-              onPress={() => router.back()}
-              testID="back-btn"
-            >
+            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={28} color="white" />
             </TouchableOpacity>
             <View style={styles.titleContainer}>
@@ -216,7 +366,6 @@ export default function CameraScreen() {
               style={styles.galleryBtn}
               onPress={pickImage}
               disabled={isLoading}
-              testID="gallery-btn"
             >
               <Ionicons name="images" size={28} color="white" />
             </TouchableOpacity>
@@ -225,7 +374,6 @@ export default function CameraScreen() {
               style={styles.captureBtn}
               onPress={takePicture}
               disabled={isLoading}
-              testID="capture-btn"
             >
               {isLoading ? (
                 <ActivityIndicator size="large" color="#667eea" />
@@ -238,7 +386,6 @@ export default function CameraScreen() {
               style={styles.scannerBtn}
               onPress={() => router.push('/barcode-scanner')}
               disabled={isLoading}
-              testID="barcode-btn"
             >
               <Ionicons name="barcode" size={28} color="white" />
             </TouchableOpacity>
@@ -249,9 +396,7 @@ export default function CameraScreen() {
               <View style={styles.loadingCard}>
                 <ActivityIndicator size="large" color="#667eea" />
                 <Text style={styles.loadingTitle}>{loadingMessage}</Text>
-                <Text style={styles.loadingSubtitle}>
-                  AI анализирует товар на изображении
-                </Text>
+                <Text style={styles.loadingSubtitle}>AI анализирует товар</Text>
               </View>
             </View>
           )}
@@ -281,9 +426,7 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 40, position: 'relative',
   },
-  frameCorner: {
-    position: 'absolute', width: 60, height: 60, borderColor: 'white',
-  },
+  frameCorner: { position: 'absolute', width: 60, height: 60, borderColor: 'white' },
   topLeft: {
     top: '25%', left: 40,
     borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 8,
@@ -338,12 +481,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'white', padding: 32, borderRadius: 20,
     alignItems: 'center', minWidth: 250,
   },
-  loadingTitle: {
-    marginTop: 16, fontSize: 18, fontWeight: '600', color: '#1a1a1a',
-  },
-  loadingSubtitle: {
-    marginTop: 4, fontSize: 14, color: '#6c757d', textAlign: 'center',
-  },
+  loadingTitle: { marginTop: 16, fontSize: 18, fontWeight: '600', color: '#1a1a1a' },
+  loadingSubtitle: { marginTop: 4, fontSize: 14, color: '#6c757d', textAlign: 'center' },
+
   permissionWrapper: { flex: 1, backgroundColor: '#f8f9fa' },
   permissionContainer: {
     flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
@@ -360,7 +500,77 @@ const styles = StyleSheet.create({
     paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12,
   },
   permissionButtonText: { fontSize: 16, fontWeight: '600', color: 'white' },
-  backButton: {
-    backgroundColor: 'transparent', borderWidth: 2, borderColor: '#667eea',
+  backButton: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#667eea' },
+
+  // Модалка выбора и "не найдено"
+  modalContainer: { flex: 1, backgroundColor: '#f8f9fa' },
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16,
+    backgroundColor: 'white', gap: 12,
+  },
+  modalBack: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  modalSubtitle: { fontSize: 13, color: '#6c757d', marginTop: 2 },
+
+  hintText: {
+    fontSize: 14, color: '#495057', marginBottom: 12,
+    backgroundColor: 'white', padding: 12, borderRadius: 12,
+  },
+  choiceCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'white', borderRadius: 12,
+    padding: 12, marginBottom: 10, gap: 12,
+  },
+  choiceImage: {
+    width: 70, height: 70, borderRadius: 10, backgroundColor: '#dee2e6',
+  },
+  choiceImageEmpty: { alignItems: 'center', justifyContent: 'center' },
+  choiceInfo: { flex: 1 },
+  choiceName: { fontSize: 15, fontWeight: '600', color: '#1a1a1a', marginBottom: 4 },
+  choicePrice: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
+  choiceBarcode: { fontSize: 12, color: '#6c757d', marginTop: 2 },
+
+  pendingCta: {
+    marginTop: 12, backgroundColor: '#fa709a',
+    padding: 16, borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  pendingCtaText: { color: 'white', fontSize: 14, fontWeight: '600' },
+
+  // Экран "не найдено"
+  notFoundBody: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
+  },
+  notFoundIconWrap: {
+    width: 120, height: 120, borderRadius: 60,
+    backgroundColor: '#f5576c15', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 24,
+  },
+  notFoundTitle: {
+    fontSize: 22, fontWeight: 'bold', color: '#1a1a1a',
+    textAlign: 'center', marginBottom: 8,
+  },
+  notFoundHint: {
+    fontSize: 14, color: '#6c757d', marginBottom: 16, fontStyle: 'italic',
+  },
+  notFoundDescription: {
+    fontSize: 15, color: '#495057', textAlign: 'center',
+    marginBottom: 32, lineHeight: 22,
+  },
+  notFoundCta: {
+    width: '100%',
+    backgroundColor: '#667eea', paddingVertical: 16, borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    marginBottom: 12,
+  },
+  notFoundCtaText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  notFoundSecondary: {
+    paddingVertical: 12,
+  },
+  notFoundSecondaryText: {
+    color: '#667eea', fontSize: 14, fontWeight: '600',
   },
 });
