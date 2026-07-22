@@ -21,8 +21,8 @@ import * as Linking from 'expo-linking';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-// Сжатие фото через canvas на web
-async function compressBase64(base64: string, maxWidth = 800, quality = 0.6): Promise<string> {
+// Сжатие ТОЛЬКО на web. На мобилке нативная камера уже возвращает сжатое фото.
+async function compressBase64(base64: string, maxWidth = 600, quality = 0.5): Promise<string> {
   if (Platform.OS !== 'web' || typeof document === 'undefined') {
     return base64;
   }
@@ -68,12 +68,10 @@ export default function CameraScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
 
-  // Экран выбора когда несколько кандидатов
   const [showChoice, setShowChoice] = useState(false);
   const [choiceProducts, setChoiceProducts] = useState<SearchProduct[]>([]);
   const [choiceRecognized, setChoiceRecognized] = useState<string | null>(null);
 
-  // Экран "не найдено"
   const [showNotFound, setShowNotFound] = useState(false);
   const [notFoundRecognized, setNotFoundRecognized] = useState<string | null>(null);
   const [notFoundImage, setNotFoundImage] = useState<string | null>(null);
@@ -126,8 +124,9 @@ export default function CameraScreen() {
     try {
       setLoadingMessage('Делаем снимок...');
       setIsLoading(true);
+      // На мобилке quality 0.5 сразу — камера сама сожмёт, canvas не будет молотить
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
+        quality: 0.5,
         base64: true,
       });
       const compressed = await compressBase64(photo.base64);
@@ -143,7 +142,7 @@ export default function CameraScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.7,
+        quality: 0.5,
         base64: true,
       });
       if (!result.canceled && result.assets[0].base64) {
@@ -172,7 +171,6 @@ export default function CameraScreen() {
       const recognized: string | null = data.recognized_name || null;
 
       if (products.length === 0) {
-        // Товар не найден — показываем экран с кнопкой "отправить на рассмотрение"
         setNotFoundRecognized(recognized);
         setNotFoundImage(base64Image);
         setShowNotFound(true);
@@ -180,7 +178,6 @@ export default function CameraScreen() {
       }
 
       if (products.length === 1) {
-        // Один кандидат — сразу открываем карточку
         router.replace({
           pathname: '/product-detail',
           params: { productId: products[0].id },
@@ -188,7 +185,6 @@ export default function CameraScreen() {
         return;
       }
 
-      // Несколько кандидатов — показываем экран выбора
       setChoiceProducts(products);
       setChoiceRecognized(recognized);
       setShowChoice(true);
@@ -200,7 +196,6 @@ export default function CameraScreen() {
 
   const goToPendingForm = () => {
     setShowNotFound(false);
-    // Передаём распознанное название и фото, чтобы кассир не вводил заново
     router.push({
       pathname: '/submit-pending',
       params: {
@@ -222,14 +217,10 @@ export default function CameraScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* ==== ЭКРАН ВЫБОРА КОГДА НЕСКОЛЬКО КАНДИДАТОВ ==== */}
       <Modal visible={showChoice} animationType="slide" onRequestClose={() => setShowChoice(false)}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity
-              style={styles.modalBack}
-              onPress={() => setShowChoice(false)}
-            >
+            <TouchableOpacity style={styles.modalBack} onPress={() => setShowChoice(false)}>
               <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
@@ -294,14 +285,10 @@ export default function CameraScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* ==== ЭКРАН "НЕ НАЙДЕНО" ==== */}
       <Modal visible={showNotFound} animationType="slide" onRequestClose={() => setShowNotFound(false)}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity
-              style={styles.modalBack}
-              onPress={() => setShowNotFound(false)}
-            >
+            <TouchableOpacity style={styles.modalBack} onPress={() => setShowNotFound(false)}>
               <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Товар не найден</Text>
@@ -337,7 +324,6 @@ export default function CameraScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* ==== КАМЕРА ==== */}
       <CameraView style={styles.camera} ref={cameraRef} facing="back">
         <SafeAreaView style={styles.cameraOverlay}>
           <View style={styles.topBar}>
@@ -362,19 +348,11 @@ export default function CameraScreen() {
           </View>
 
           <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={styles.galleryBtn}
-              onPress={pickImage}
-              disabled={isLoading}
-            >
+            <TouchableOpacity style={styles.galleryBtn} onPress={pickImage} disabled={isLoading}>
               <Ionicons name="images" size={28} color="white" />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.captureBtn}
-              onPress={takePicture}
-              disabled={isLoading}
-            >
+            <TouchableOpacity style={styles.captureBtn} onPress={takePicture} disabled={isLoading}>
               {isLoading ? (
                 <ActivityIndicator size="large" color="#667eea" />
               ) : (
@@ -502,7 +480,6 @@ const styles = StyleSheet.create({
   permissionButtonText: { fontSize: 16, fontWeight: '600', color: 'white' },
   backButton: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#667eea' },
 
-  // Модалка выбора и "не найдено"
   modalContainer: { flex: 1, backgroundColor: '#f8f9fa' },
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16,
@@ -540,7 +517,6 @@ const styles = StyleSheet.create({
   },
   pendingCtaText: { color: 'white', fontSize: 14, fontWeight: '600' },
 
-  // Экран "не найдено"
   notFoundBody: {
     flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
   },
@@ -567,9 +543,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   notFoundCtaText: { color: 'white', fontSize: 16, fontWeight: '600' },
-  notFoundSecondary: {
-    paddingVertical: 12,
-  },
+  notFoundSecondary: { paddingVertical: 12 },
   notFoundSecondaryText: {
     color: '#667eea', fontSize: 14, fontWeight: '600',
   },
