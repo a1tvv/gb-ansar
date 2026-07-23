@@ -9,17 +9,14 @@ import {
   FlatList,
   Image,
   TextInput,
-  ActivityIndicator,
   Alert,
   RefreshControl,
-  ImageBackground,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const PAGE_SIZE = 20;
-const BACKGROUND_IMAGE_URL = 'https://ansar-home.ams3.cdn.digitaloceanspaces.com/katalog_bg.jpg';
 
 interface Product {
   id: string;
@@ -204,7 +201,6 @@ export default function CatalogScreen() {
       ))}
     </View>
   );
-  
 
   const renderPagination = () => {
     if (searchQuery.trim() || totalPages <= 1) return null;
@@ -258,86 +254,72 @@ export default function CatalogScreen() {
   };
 
   return (
-    <ImageBackground
-      source={{ uri: BACKGROUND_IMAGE_URL }}
-      style={styles.background}
-      resizeMode="cover"
-    >
-      {/* Затемняющий слой поверх фона, чтобы карточки читались */}
-      <View style={styles.overlay} />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
 
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Каталог товаров</Text>
+        <TouchableOpacity
+          style={styles.barcodeBtn}
+          onPress={() => router.push('/barcode-scanner')}
+          testID="catalog-barcode-btn"
+        >
+          <Ionicons name="barcode" size={24} color="#1a1a1a" />
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color="#6c757d" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Поиск товаров..."
+          value={searchQuery}
+          onChangeText={handleSearch}
+          placeholderTextColor="#adb5bd"
+          testID="search-input"
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => handleSearch('')}>
+            <Ionicons name="close-circle" size={20} color="#adb5bd" />
           </TouchableOpacity>
-          <Text style={styles.title}>Каталог товаров</Text>
-          <TouchableOpacity
-            style={styles.barcodeBtn}
-            onPress={() => router.push('/barcode-scanner')}
-            testID="catalog-barcode-btn"
-          >
-            <Ionicons name="barcode" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#fff" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Поиск товаров..."
-            value={searchQuery}
-            onChangeText={handleSearch}
-            placeholderTextColor="rgba(255, 255, 255, 0.7)"
-            testID="search-input"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')}>
-              <Ionicons name="close-circle" size={20} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {isLoading && !refreshing ? (
-          renderSkeletons()
-        ) : products.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="cube-outline" size={80} color="rgba(255,255,255,0.5)" />
-            <Text style={styles.emptyTitle}>Товары не найдены</Text>
-            <Text style={styles.emptyText}>
-              {searchQuery ? 'Попробуйте изменить запрос' : 'Каталог пока пуст'}
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={products}
-            renderItem={renderProductCard}
-            keyExtractor={(item) => item.id}
-            numColumns={2}
-            columnWrapperStyle={styles.row}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
-            }
-            ListFooterComponent={renderPagination}
-          />
         )}
-      </SafeAreaView>
-    </ImageBackground>
+      </View>
+
+      {isLoading && !refreshing ? (
+        renderSkeletons()
+      ) : products.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="cube-outline" size={80} color="#ced4da" />
+          <Text style={styles.emptyTitle}>Товары не найдены</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery ? 'Попробуйте изменить запрос' : 'Каталог пока пуст'}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={products}
+          renderItem={renderProductCard}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          columnWrapperStyle={styles.row}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
+          }
+          ListFooterComponent={renderPagination}
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  background: { flex: 1, backgroundColor: '#000' },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)', // затемнение, чтобы белые карточки читались
-  },
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: '#f5f6f8' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -346,38 +328,37 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backgroundColor: '#fff',
+    borderWidth: 1, borderColor: '#e9ecef',
   },
   barcodeBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backgroundColor: '#fff',
+    borderWidth: 1, borderColor: '#e9ecef',
   },
   title: {
-    fontSize: 20, fontWeight: 'bold', color: '#fff',
-    textShadowColor: 'rgba(0, 0, 0, 0.6)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    fontSize: 20, fontWeight: 'bold', color: '#1a1a1a',
   },
 
   searchContainer: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: '#fff',
     marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: '#e9ecef',
   },
   searchIcon: { marginRight: 12 },
-  searchInput: { flex: 1, fontSize: 16, color: '#fff', fontWeight: '500' },
+  searchInput: { flex: 1, fontSize: 16, color: '#1a1a1a', fontWeight: '500' },
 
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
   row: { justifyContent: 'space-between', paddingHorizontal: 8 },
   productCard: {
     backgroundColor: 'white', borderRadius: 12, marginBottom: 12,
     width: '48%', overflow: 'hidden', position: 'relative',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25, shadowRadius: 6, elevation: 4,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
   },
   productImage: { width: '100%', height: 185, backgroundColor: '#f8f9fa' },
   noImage: { alignItems: 'center', justifyContent: 'center' },
@@ -396,16 +377,10 @@ const styles = StyleSheet.create({
 
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyTitle: {
-    fontSize: 24, fontWeight: 'bold', color: '#fff', marginTop: 16, marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.6)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16, marginBottom: 8,
   },
   emptyText: {
-    fontSize: 16, color: 'rgba(255, 255, 255, 0.85)', textAlign: 'center', marginBottom: 24,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24,
   },
 
   // Pagination
@@ -413,10 +388,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20, alignItems: 'center', gap: 12,
   },
   paginationInfo: {
-    fontSize: 12, color: 'rgba(255, 255, 255, 0.85)',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    fontSize: 12, color: '#6c757d',
   },
   paginationRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap',
@@ -425,7 +397,7 @@ const styles = StyleSheet.create({
   pageBtn: {
     minWidth: 36, height: 36, borderRadius: 8,
     backgroundColor: 'white',
-    borderWidth: 1, borderColor: 'rgba(102, 126, 234, 0.2)',
+    borderWidth: 1, borderColor: '#e9ecef',
     alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 10,
   },
@@ -442,7 +414,7 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   pageDots: {
-    fontSize: 16, color: 'rgba(255, 255, 255, 0.7)', paddingHorizontal: 4,
+    fontSize: 16, color: '#adb5bd', paddingHorizontal: 4,
   },
 
   // Skeleton
