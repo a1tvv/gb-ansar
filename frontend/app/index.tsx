@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
-  ScrollView,
   Platform,
   Linking,
 } from 'react-native';
@@ -76,15 +75,16 @@ function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
 
-        {/* Компактный хедер */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Ansar HomeWear</Text>
-          <Text style={styles.subtitle}>Каталог и поиск товаров</Text>
-        </View>
+      {/* Хедер сверху */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Ansar HomeWear</Text>
+        <Text style={styles.subtitle}>Каталог и поиск товаров</Text>
+      </View>
 
-        {/* PWA-баннер */}
+      {/* Центральная зона — вся навигация здесь, вертикально по центру */}
+      <View style={styles.centerZone}>
+
         {showInstallBanner && Platform.OS === 'web' && (
           <TouchableOpacity
             style={styles.installBanner}
@@ -93,21 +93,21 @@ function HomeScreen() {
             testID="install-pwa-btn"
           >
             <View style={styles.installIconWrap}>
-              <Ionicons name="download-outline" size={22} color="#4F46E5" />
+              <Ionicons name="download-outline" size={20} color="#4F46E5" />
             </View>
             <View style={styles.installContent}>
               <Text style={styles.installTitle}>Установить на телефон</Text>
-              <Text style={styles.installSubtitle}>Быстрый доступ с рабочего экрана</Text>
+              <Text style={styles.installSubtitle}>Быстрый доступ</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </TouchableOpacity>
         )}
 
-        {/* Основные действия — крупные, кассир делает их каждый день */}
+        {/* Топ-2 приоритетных действия */}
         <View style={styles.primarySection}>
           <PrimaryAction
             title="Поиск по фото"
-            subtitle="Сфотографируйте товар для распознавания"
+            subtitle="Сфотографируйте товар"
             icon="camera"
             accentColor="#4F46E5"
             onPress={() => router.push('/camera')}
@@ -123,7 +123,7 @@ function HomeScreen() {
           />
         </View>
 
-        {/* Каталог — вторичное действие */}
+        {/* Каталог */}
         <TouchableOpacity
           style={styles.secondaryAction}
           onPress={() => router.push('/catalog')}
@@ -131,17 +131,16 @@ function HomeScreen() {
           testID="menu-3"
         >
           <View style={[styles.secondaryIcon, { backgroundColor: '#F3F4F6' }]}>
-            <Ionicons name="grid-outline" size={22} color="#374151" />
+            <Ionicons name="grid-outline" size={20} color="#374151" />
           </View>
           <View style={styles.secondaryContent}>
             <Text style={styles.secondaryTitle}>Каталог товаров</Text>
             <Text style={styles.secondaryHint}>Все товары склада</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+          <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
         </TouchableOpacity>
 
-        {/* Секция pending */}
-        <Text style={styles.sectionLabel}>ЗАЯВКИ И РАССМОТРЕНИЕ</Text>
+        {/* Группа pending */}
         <View style={styles.tertiaryGroup}>
           <TouchableOpacity
             style={[styles.tertiaryAction, styles.tertiaryDivider]}
@@ -150,13 +149,13 @@ function HomeScreen() {
             testID="menu-4"
           >
             <View style={[styles.tertiaryIcon, { backgroundColor: '#FEF3C7' }]}>
-              <Ionicons name="add" size={20} color="#D97706" />
+              <Ionicons name="add" size={18} color="#D97706" />
             </View>
             <View style={styles.tertiaryContent}>
               <Text style={styles.tertiaryTitle}>Отправить товар</Text>
-              <Text style={styles.tertiaryHint}>Проблемный товар админу склада</Text>
+              <Text style={styles.tertiaryHint}>Проблемный товар админу</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -166,48 +165,46 @@ function HomeScreen() {
             testID="menu-5"
           >
             <View style={[styles.tertiaryIcon, { backgroundColor: '#DBEAFE' }]}>
-              <Ionicons name="clipboard-outline" size={20} color="#2563EB" />
+              <Ionicons name="clipboard-outline" size={18} color="#2563EB" />
             </View>
             <View style={styles.tertiaryContent}>
               <Text style={styles.tertiaryTitle}>Заявки на рассмотрение</Text>
               <Text style={styles.tertiaryHint}>Для админов склада</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
-        {/* Футер */}
-        <View style={styles.footer}>
-          {isInstalled ? (
-            <Text style={styles.footerText}>✓ Установлено как приложение · v2.0</Text>
-          ) : (
-            <Text style={styles.footerText}>
-              Разработчики{' '}
-              <Text
-                style={styles.devLink}
-                onPress={() => Linking.openURL('https://instagram.com/ab.dussi')}
-              >
-                ab.dussi
-              </Text>
-              {', '}
-              <Text
-                style={styles.devLink}
-                onPress={() => Linking.openURL('https://instagram.com/du.z.r')}
-              >
-                du.z.r
-              </Text>
-            </Text>
-          )}
-        </View>
+      </View>
 
-      </ScrollView>
+      {/* Футер снизу */}
+      <View style={styles.footer}>
+        {isInstalled ? (
+          <Text style={styles.footerText}>✓ Установлено как приложение · v2.0</Text>
+        ) : (
+          <Text style={styles.footerText}>
+            Разработчики{' '}
+            <Text
+              style={styles.devLink}
+              onPress={() => Linking.openURL('https://instagram.com/ab.dussi')}
+            >
+              ab.dussi
+            </Text>
+            {', '}
+            <Text
+              style={styles.devLink}
+              onPress={() => Linking.openURL('https://instagram.com/du.z.r')}
+            >
+              du.z.r
+            </Text>
+          </Text>
+        )}
+      </View>
+
     </SafeAreaView>
   );
 }
 
-/**
- * Основное действие — крупная карточка с цветным акцентом слева.
- */
 function PrimaryAction({
   title,
   subtitle,
@@ -231,14 +228,14 @@ function PrimaryAction({
       testID={testID}
     >
       <View style={[styles.primaryIconWrap, { backgroundColor: `${accentColor}15` }]}>
-        <Ionicons name={icon} size={30} color={accentColor} />
+        <Ionicons name={icon} size={28} color={accentColor} />
       </View>
       <View style={styles.primaryContent}>
         <Text style={styles.primaryTitle}>{title}</Text>
         <Text style={styles.primarySubtitle}>{subtitle}</Text>
       </View>
       <View style={[styles.primaryArrow, { backgroundColor: accentColor }]}>
-        <Ionicons name="arrow-forward" size={18} color="white" />
+        <Ionicons name="arrow-forward" size={16} color="white" />
       </View>
     </TouchableOpacity>
   );
@@ -246,98 +243,146 @@ function PrimaryAction({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F3F4F6' },
-  scrollContent: { paddingBottom: 32 },
 
-  // Header
-  header: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 20 },
-  title: { fontSize: 28, fontWeight: '700', color: '#111827', letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: '#6B7280', marginTop: 4 },
+  // Хедер компактный сверху
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
 
-  // PWA install
+  // Центральная зона — весь контент, вертикально по центру
+  centerZone: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+
+  // PWA
   installBanner: {
-    flexDirection: 'row', alignItems: 'center',
-    marginHorizontal: 20, marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
     backgroundColor: 'white',
-    borderRadius: 14,
-    paddingVertical: 12, paddingHorizontal: 14, gap: 12,
-    borderWidth: 1, borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   installIconWrap: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#EEF2FF',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   installContent: { flex: 1 },
-  installTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  installSubtitle: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  installTitle: { fontSize: 13, fontWeight: '600', color: '#111827' },
+  installSubtitle: { fontSize: 11, color: '#6B7280', marginTop: 1 },
 
-  // Primary actions — крупные, для повседневной работы
-  primarySection: { paddingHorizontal: 20, gap: 12, marginBottom: 12 },
+  // Крупные основные действия
+  primarySection: { gap: 10, marginBottom: 10 },
   primaryAction: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', borderRadius: 16,
-    padding: 18, gap: 16,
-    borderWidth: 1, borderColor: '#E5E7EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 14,
+    padding: 14,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   primaryIconWrap: {
-    width: 56, height: 56, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
+    width: 52,
+    height: 52,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryContent: { flex: 1 },
-  primaryTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  primarySubtitle: { fontSize: 13, color: '#6B7280', marginTop: 3, lineHeight: 18 },
+  primaryTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  primarySubtitle: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   primaryArrow: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  // Secondary — каталог, помельче
+  // Каталог
   secondaryAction: {
-    flexDirection: 'row', alignItems: 'center',
-    marginHorizontal: 20, marginTop: 8, marginBottom: 20,
-    backgroundColor: 'white', borderRadius: 14,
-    padding: 14, gap: 14,
-    borderWidth: 1, borderColor: '#E5E7EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   secondaryIcon: {
-    width: 44, height: 44, borderRadius: 12,
-    alignItems: 'center', justifyContent: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   secondaryContent: { flex: 1 },
-  secondaryTitle: { fontSize: 15, fontWeight: '600', color: '#111827' },
-  secondaryHint: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  secondaryTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  secondaryHint: { fontSize: 11, color: '#6B7280', marginTop: 1 },
 
-  // Section label
-  sectionLabel: {
-    fontSize: 11, fontWeight: '600', color: '#6B7280',
-    letterSpacing: 0.5,
-    paddingHorizontal: 24, marginBottom: 8,
-  },
-
-  // Tertiary — pending, компактнее и объединены в группу
+  // Pending группа
   tertiaryGroup: {
-    marginHorizontal: 20,
-    backgroundColor: 'white', borderRadius: 14,
-    borderWidth: 1, borderColor: '#E5E7EB',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
   },
   tertiaryAction: {
-    flexDirection: 'row', alignItems: 'center',
-    padding: 14, gap: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 12,
   },
   tertiaryDivider: {
-    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   tertiaryIcon: {
-    width: 36, height: 36, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tertiaryContent: { flex: 1 },
-  tertiaryTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  tertiaryHint: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  tertiaryTitle: { fontSize: 13, fontWeight: '600', color: '#111827' },
+  tertiaryHint: { fontSize: 11, color: '#6B7280', marginTop: 1 },
 
-  // Footer
-  footer: { marginTop: 32, alignItems: 'center', paddingHorizontal: 20 },
-  footerText: { fontSize: 12, color: '#9CA3AF' },
+  // Футер снизу
+  footer: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    paddingTop: 8,
+  },
+  footerText: { fontSize: 11, color: '#9CA3AF' },
   devLink: { color: '#4F46E5', fontWeight: '600' },
 });
