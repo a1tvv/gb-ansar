@@ -16,7 +16,6 @@ import re
 import aioboto3
 import base64
 
-
 from bot import build_bot, notify_admins
 
 s3_endpoint = os.environ.get('S3_ENDPOINT_URL')
@@ -35,7 +34,6 @@ db = client[db_name]
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Публичный URL сайта — для формирования ссылок в уведомлениях админам
 PUBLIC_SITE_URL = os.environ.get('PUBLIC_SITE_URL', 'https://gb-ansar.vercel.app')
 
 
@@ -90,9 +88,8 @@ class SearchResponse(BaseModel):
     products: List[Product]
     confidence: Optional[str] = None
     ai_analysis: Optional[str] = None
+    recognized_name: Optional[str] = None  # что ИИ распознал (для передачи в форму)
 
-
-# ============= Pending Product Models =============
 
 class PendingProduct(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -100,7 +97,7 @@ class PendingProduct(BaseModel):
     images: List[str] = Field(default_factory=list)
     barcode: Optional[str] = None
     article_number: Optional[str] = None
-    note: Optional[str] = None  # свободный комментарий от кассира
+    note: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -113,7 +110,6 @@ class PendingProductCreate(BaseModel):
 
 
 class PendingApproveRequest(BaseModel):
-    """Данные которые админ вводит когда оформляет pending в реальный товар."""
     name: str
     price: float
     images: List[str] = Field(..., min_length=1, max_length=5)
@@ -173,20 +169,16 @@ async def upload_base64_to_s3(base64_data: str, folder: str = "products") -> str
 
 
 async def delete_s3_object(image_url: str) -> bool:
-    """Удаляет объект из S3 по его публичному URL."""
     if not all([s3_endpoint, s3_bucket, s3_access_key, s3_secret_key]):
         return False
     if not image_url:
         return False
     try:
-        # Извлекаем ключ из URL: https://ansar-home.ams3.digitaloceanspaces.com/products/uuid.jpg -> products/uuid.jpg
         domain = s3_endpoint.replace("https://", "")
         prefix = f"https://{s3_bucket}.{domain}/"
         if not image_url.startswith(prefix):
-            logger.warning(f"URL не из нашего бакета, пропускаю: {image_url}")
             return False
         key = image_url[len(prefix):]
-
         session = aioboto3.Session()
         async with session.client(
             's3',
@@ -195,7 +187,6 @@ async def delete_s3_object(image_url: str) -> bool:
             aws_secret_access_key=s3_secret_key
         ) as s3:
             await s3.delete_object(Bucket=s3_bucket, Key=key)
-        logger.info(f"S3 object deleted: {key}")
         return True
     except Exception as e:
         logger.error(f"Error deleting S3 object: {e}")
@@ -203,7 +194,6 @@ async def delete_s3_object(image_url: str) -> bool:
 
 
 async def upload_images_to_s3(images: List[str], folder: str = "products") -> List[str]:
-    """Пропускает через S3 список base64/URL. base64 заливает, готовые URL оставляет."""
     urls = []
     for image_data in images:
         if image_data.startswith("data:image") or len(image_data) > 1000:
@@ -223,8 +213,8 @@ async def generate_keywords(name: str, first_image: str) -> str:
         prompt = (
             f"Официальное название этого товара: '{name}'. "
             "Посмотри на фото и напиши 10 синонимов, ассоциаций или простых слов, "
-            "которыми обычный человек мог бы назвать этот предмет (например: если это кружка, напиши 'стакан чашка бокал'). "
-            "Верни ТОЛЬКО слова через пробел, без запятых и других символов. Никаких пояснений."
+            "которыми обычный человек мог бы назвать этот предмет. "
+            "Верни ТОЛЬКО слова через пробел, без запятых. Никаких пояснений."
         )
         messages = [{
             "role": "user",
@@ -236,7 +226,6 @@ async def generate_keywords(name: str, first_image: str) -> str:
         resp = await call_openrouter(messages)
         if resp:
             kw = resp.replace(',', ' ').replace('\n', ' ').strip()
-            logging.info(f"Generated keywords for {name}: {kw}")
             return kw
     except Exception as e:
         logging.error(f"Failed to generate keywords: {e}")
@@ -254,7 +243,7 @@ def product_doc_to_model(doc: dict) -> dict:
 
 # ============= Bot bootstrap =============
 
-bot_instance = None  # понадобится для уведомлений
+bot_instance = None
 bot_task = None
 
 
@@ -267,7 +256,7 @@ async def lifespan(app: FastAPI):
     await db.pending_products.create_index("created_at")
 
     global bot_task, bot_instance
-    bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product)
+    bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_object)
     if bot and dp:
         bot_instance = bot
         bot_task = asyncio.create_task(dp.start_polling(bot))
@@ -294,7 +283,7 @@ app.add_middleware(
 )
 
 
-# ============= Category Routes =============
+# ============= Categories =============
 
 @api_router.get("/categories", response_model=List[Category])
 async def get_categories():
@@ -308,7 +297,7 @@ async def create_category(category: Category):
     return category
 
 
-# ============= Product Routes =============
+# ============= Products =============
 
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
@@ -343,6 +332,7 @@ async def get_products(
         result.append(Product(**doc))
     return result
 
+
 @api_router.get("/products/paged")
 async def get_products_paged(
     category: Optional[str] = None,
@@ -350,10 +340,6 @@ async def get_products_paged(
     page: int = 1,
     limit: int = 20
 ):
-    """
-    Пагинация с номерами страниц.
-    Возвращает {items, total, page, pages, limit}.
-    """
     if page < 1:
         page = 1
     if limit < 1 or limit > 100:
@@ -366,7 +352,7 @@ async def get_products_paged(
         query["subcategory"] = subcategory
 
     total = await db.products.count_documents(query)
-    pages = (total + limit - 1) // limit  # округление вверх
+    pages = (total + limit - 1) // limit
 
     skip = (page - 1) * limit
     docs = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
@@ -378,13 +364,8 @@ async def get_products_paged(
             doc['images'] = [doc['images'][0]]
         items.append(Product(**doc))
 
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "pages": pages,
-        "limit": limit,
-    }
+    return {"items": items, "total": total, "page": page, "pages": pages, "limit": limit}
+
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
@@ -402,18 +383,30 @@ async def search_by_barcode(barcode: str):
 
 @api_router.post("/products/search/photo", response_model=SearchResponse)
 async def search_by_photo(request: PhotoSearchRequest):
+    """
+    Один шаг ИИ, без гадания.
+    - ИИ говорит одно слово (что на фото)
+    - Ищем в БД по name/keywords
+    - 0 → not_found (кассир отправит на рассмотрение)
+    - 1 → отдаём один
+    - >1 → отдаём ВСЕХ кандидатов, кассир выбирает глазами
+    """
     try:
         img_base64 = request.image_base64
         if "," in img_base64:
             img_base64 = img_base64.split(",")[1]
 
-        # ШАГ 1: ИИ называет предмет
         messages = [{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": "Ты - система распознавания товаров. Назови главный предмет на фото ОДНИМ-ДВУМЯ СЛОВАМИ на русском языке (например: Кружка, Мочалка, Ваза). Не пиши никаких объяснений, только само название предмета."
+                    "text": (
+                        "Ты - система распознавания товаров. "
+                        "Назови главный предмет на фото ОДНИМ-ДВУМЯ СЛОВАМИ на русском языке "
+                        "(например: Кружка, Мочалка, Ваза). "
+                        "Не пиши объяснений, только само название предмета."
+                    ),
                 },
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
             ]
@@ -423,7 +416,12 @@ async def search_by_photo(request: PhotoSearchRequest):
         logging.info(f"AI recognized: {ai_keyword}")
 
         if not ai_keyword:
-            return SearchResponse(products=[], confidence="no_match", ai_analysis="Не удалось распознать товар")
+            return SearchResponse(
+                products=[],
+                confidence="not_found",
+                ai_analysis="ИИ не смог распознать товар",
+                recognized_name=None,
+            )
 
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
@@ -434,77 +432,32 @@ async def search_by_photo(request: PhotoSearchRequest):
                 {"keywords": {"$regex": first_word, "$options": "i"}}
             ]
         }
-        matched_docs = await db.products.find(regex_query).to_list(20)
+        matched_docs = await db.products.find(regex_query).sort("created_at", -1).to_list(20)
 
         if not matched_docs:
             return SearchResponse(
                 products=[],
                 confidence="not_found",
-                ai_analysis=f"Товара «{clean_keyword}» нет в каталоге"
+                ai_analysis=f"Товара «{clean_keyword}» нет в каталоге",
+                recognized_name=clean_keyword,
             )
 
-        # ШАГ 2: всегда визуально сравниваем с эталонами (даже если кандидат один)
-        # ИИ должен подтвердить что это тот самый товар, а не просто похожий
-        content = [{
-            "type": "text",
-            "text": (
-                "На ПЕРВОМ фото — товар, сфотографированный кассиром. "
-                "Далее идут эталонные фото товаров из каталога с их номерами.\n\n"
-                "Твоя задача: определить какой ИМЕННО из эталонов на первом фото. "
-                "Сравнивай форму, упаковку, надписи, бренд, размер — форма важнее цвета.\n\n"
-                "ВАЖНО: если ни один эталон не совпадает уверенно с фото кассира — верни 0. "
-                "Лучше честный 0, чем случайное угадывание.\n\n"
-                "ФОРМАТ ОТВЕТА — ТОЛЬКО ОДНА ЦИФРА (номер эталона или 0). Без пояснений."
-            )
-        }]
+        products_list = [Product(**product_doc_to_model(p)) for p in matched_docs]
 
-        content.append({"type": "text", "text": "ФОТО_КАССИРА:"})
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
-        })
-
-        candidates_with_images = []
-        for i, p in enumerate(matched_docs):
-            imgs = p.get("images") or []
-            if imgs:
-                candidates_with_images.append(p)
-                content.append({
-                    "type": "text",
-                    "text": f"ЭТАЛОН #{len(candidates_with_images)} — {p['name']}:"
-                })
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": imgs[0]}
-                })
-
-        # Если ни у одного кандидата нет фото — сравнивать не с чем
-        if not candidates_with_images:
+        if len(products_list) == 1:
             return SearchResponse(
-                products=[],
-                confidence="not_found",
-                ai_analysis=f"Не удалось сравнить с эталонами"
+                products=products_list,
+                confidence="single",
+                ai_analysis=f"Распознано: {clean_keyword}",
+                recognized_name=clean_keyword,
             )
 
-        refine_result = await call_openrouter([{"role": "user", "content": content}])
-        logging.info(f"AI refined: {refine_result}")
-
-        match = re.search(r'\d+', refine_result)
-        if match:
-            idx = int(match.group()) - 1
-            if 0 <= idx < len(candidates_with_images):
-                chosen = candidates_with_images[idx]
-                return SearchResponse(
-                    products=[Product(**product_doc_to_model(chosen))],
-                    confidence="high",
-                    ai_analysis=f"Распознано: {chosen['name']}"
-                )
-
-        # ИИ вернул 0 или что-то невалидное — товар не найден
+        # Несколько кандидатов — отдаём все, кассир выберет глазами
         return SearchResponse(
-            products=[],
-            confidence="not_found",
-            ai_analysis=f"Похожего товара «{clean_keyword}» нет в каталоге"
+            products=products_list,
+            confidence="multiple",
+            ai_analysis=f"Найдено {len(products_list)} вариантов «{clean_keyword}»",
+            recognized_name=clean_keyword,
         )
 
     except Exception as e:
@@ -537,27 +490,22 @@ async def delete_product(product_id: str):
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-
-    # Чистим S3 при удалении
     for img_url in product.get("images", []):
         await delete_s3_object(img_url)
-
     await db.products.delete_one({"id": product_id})
     return {"message": "Product deleted successfully"}
 
 
-# ============= Pending Product Routes =============
+# ============= Pending =============
 
 @api_router.post("/pending-products", response_model=PendingProduct)
 async def create_pending_product(data: PendingProductCreate):
-    """Кассир отправляет заявку на рассмотрение."""
     payload = data.dict()
     payload["images"] = await upload_images_to_s3(payload.get("images", []), folder="pending")
 
     pending = PendingProduct(**payload)
     await db.pending_products.insert_one(pending.dict())
 
-    # Уведомляем админов в Telegram
     try:
         if bot_instance is not None:
             link = f"{PUBLIC_SITE_URL}/pending-detail?id={pending.id}"
@@ -597,12 +545,10 @@ async def get_pending_product(pending_id: str):
 
 @api_router.post("/pending-products/{pending_id}/approve", response_model=Product)
 async def approve_pending_product(pending_id: str, data: PendingApproveRequest):
-    """Админ оформляет pending: создаёт полноценный товар, удаляет заявку и её старые фото."""
     pending = await db.pending_products.find_one({"id": pending_id})
     if not pending:
         raise HTTPException(status_code=404, detail="Pending product not found")
 
-    # Заливаем новые фото (те что прислал админ) — они могут быть base64 или готовые URL
     product_dict = data.dict()
     product_dict["images"] = await upload_images_to_s3(product_dict.get("images", []))
     product_dict["keywords"] = await generate_keywords(data.name, data.images[0])
@@ -610,7 +556,6 @@ async def approve_pending_product(pending_id: str, data: PendingApproveRequest):
     product = Product(**product_dict)
     await db.products.insert_one(product.dict())
 
-    # Удаляем старые фото из pending (если админ их не переиспользовал)
     admin_urls = set(product_dict["images"])
     for old_url in pending.get("images", []):
         if old_url not in admin_urls:
@@ -622,23 +567,18 @@ async def approve_pending_product(pending_id: str, data: PendingApproveRequest):
 
 @api_router.delete("/pending-products/{pending_id}")
 async def reject_pending_product(pending_id: str):
-    """Админ отклоняет: удаляет запись и все её фото из S3."""
     pending = await db.pending_products.find_one({"id": pending_id})
     if not pending:
         raise HTTPException(status_code=404, detail="Pending product not found")
-
     for img_url in pending.get("images", []):
         await delete_s3_object(img_url)
-
     await db.pending_products.delete_one({"id": pending_id})
     return {"message": "Pending product rejected and deleted"}
 
 
-# ============= Meta =============
-
 @api_router.get("/")
 async def root():
-    return {"message": "Smart AI Product Catalog API", "version": "2.0.0"}
+    return {"message": "Smart AI Product Catalog API", "version": "2.1.0"}
 
 
 @app.get("/health")
