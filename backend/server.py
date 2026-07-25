@@ -387,9 +387,8 @@ async def search_by_photo(request: PhotoSearchRequest):
     Один шаг ИИ, без гадания.
     - ИИ говорит одно слово (что на фото)
     - Ищем в БД по name/keywords
-    - 0 → not_found (кассир отправит на рассмотрение)
-    - 1 → отдаём один
-    - >1 → отдаём ВСЕХ кандидатов, кассир выбирает глазами
+    - Сортируем: сначала совпадения в name, потом в keywords
+    - Отдаём максимум 6 кандидатов
     """
     try:
         img_base64 = request.image_base64
@@ -426,13 +425,26 @@ async def search_by_photo(request: PhotoSearchRequest):
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
 
-        regex_query = {
-            "$or": [
-                {"name": {"$regex": first_word, "$options": "i"}},
+        # Ищем сначала по name, потом добавим по keywords (без дубликатов)
+        name_matches = await db.products.find(
+            {"name": {"$regex": first_word, "$options": "i"}}
+        ).sort("created_at", -1).to_list(6)
+
+        matched_docs = list(name_matches)
+        matched_ids = {d["id"] for d in matched_docs}
+
+        # Если по name меньше 6, добираем из keywords
+        if len(matched_docs) < 6:
+            keyword_matches = await db.products.find(
                 {"keywords": {"$regex": first_word, "$options": "i"}}
-            ]
-        }
-        matched_docs = await db.products.find(regex_query).sort("created_at", -1).to_list(20)
+            ).sort("created_at", -1).to_list(20)
+
+            for doc in keyword_matches:
+                if doc["id"] not in matched_ids:
+                    matched_docs.append(doc)
+                    matched_ids.add(doc["id"])
+                    if len(matched_docs) >= 6:
+                        break
 
         if not matched_docs:
             return SearchResponse(
@@ -452,7 +464,6 @@ async def search_by_photo(request: PhotoSearchRequest):
                 recognized_name=clean_keyword,
             )
 
-        # Несколько кандидатов — отдаём все, кассир выберет глазами
         return SearchResponse(
             products=products_list,
             confidence="multiple",
