@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,11 @@ import {
   FlatList,
   Image,
   TextInput,
+  ActivityIndicator,
   Alert,
   RefreshControl,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -57,6 +58,8 @@ function getPageNumbers(current: number, total: number): (number | 'dots')[] {
 
 export default function CatalogScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ q?: string }>();
+
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -69,6 +72,7 @@ export default function CatalogScreen() {
   const flatListRef = useRef<FlatList>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadingRef = useRef(false);
+  const didHandleParamRef = useRef(false);
 
   const loadPage = useCallback(async (pageNum: number) => {
     if (loadingRef.current) return;
@@ -128,15 +132,32 @@ export default function CatalogScreen() {
     }, 350);
   };
 
+  // Если пришёл ?q= из URL — подставляем и ищем
+  useEffect(() => {
+    if (didHandleParamRef.current) return;
+    if (params.q && typeof params.q === 'string' && params.q.trim()) {
+      didHandleParamRef.current = true;
+      setSearchQuery(params.q);
+      searchProducts(params.q);
+    }
+  }, [params.q, searchProducts]);
+
   useFocusEffect(
     useCallback(() => {
-      loadPage(1);
+      // Если параметра нет — грузим первую страницу как обычно
+      if (!params.q) {
+        loadPage(1);
+      }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadPage(page);
+    if (searchQuery.trim()) {
+      searchProducts(searchQuery);
+    } else {
+      loadPage(page);
+    }
   };
 
   const goToPage = (p: number) => {
@@ -187,7 +208,7 @@ export default function CatalogScreen() {
           )}
           <View style={styles.priceRow}>
             <Text style={styles.productPrice}>{item.price.toLocaleString('ru-RU')} ₸</Text>
-            <Ionicons name="chevron-forward" size={16} color="#667eea" />
+            <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
           </View>
         </View>
       </TouchableOpacity>
@@ -218,7 +239,7 @@ export default function CatalogScreen() {
             onPress={() => goToPage(page - 1)}
             disabled={page === 1}
           >
-            <Ionicons name="chevron-back" size={18} color={page === 1 ? '#adb5bd' : '#667eea'} />
+            <Ionicons name="chevron-back" size={18} color={page === 1 ? '#adb5bd' : '#4F46E5'} />
           </TouchableOpacity>
 
           {pages.map((p, idx) =>
@@ -245,7 +266,7 @@ export default function CatalogScreen() {
             <Ionicons
               name="chevron-forward"
               size={18}
-              color={page === totalPages ? '#adb5bd' : '#667eea'}
+              color={page === totalPages ? '#adb5bd' : '#4F46E5'}
             />
           </TouchableOpacity>
         </View>
@@ -259,7 +280,7 @@ export default function CatalogScreen() {
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.title}>Каталог товаров</Text>
         <TouchableOpacity
@@ -267,23 +288,23 @@ export default function CatalogScreen() {
           onPress={() => router.push('/barcode-scanner')}
           testID="catalog-barcode-btn"
         >
-          <Ionicons name="barcode" size={24} color="#1a1a1a" />
+          <Ionicons name="barcode" size={24} color="#4F46E5" />
         </TouchableOpacity>
       </View>
 
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#6c757d" style={styles.searchIcon} />
+        <Ionicons name="search" size={18} color="#9CA3AF" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Поиск товаров..."
           value={searchQuery}
           onChangeText={handleSearch}
-          placeholderTextColor="#adb5bd"
+          placeholderTextColor="#9CA3AF"
           testID="search-input"
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => handleSearch('')}>
-            <Ionicons name="close-circle" size={20} color="#adb5bd" />
+            <Ionicons name="close-circle" size={20} color="#9CA3AF" />
           </TouchableOpacity>
         )}
       </View>
@@ -292,7 +313,7 @@ export default function CatalogScreen() {
         renderSkeletons()
       ) : products.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="cube-outline" size={80} color="#ced4da" />
+          <Ionicons name="cube-outline" size={80} color="#D1D5DB" />
           <Text style={styles.emptyTitle}>Товары не найдены</Text>
           <Text style={styles.emptyText}>
             {searchQuery ? 'Попробуйте изменить запрос' : 'Каталог пока пуст'}
@@ -309,7 +330,7 @@ export default function CatalogScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#667eea" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4F46E5" />
           }
           ListFooterComponent={renderPagination}
         />
@@ -319,48 +340,43 @@ export default function CatalogScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f6f8' },
+  container: { flex: 1, backgroundColor: '#F3F4F6' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 16,
+    paddingHorizontal: 16, paddingVertical: 16, backgroundColor: 'white',
+    borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
   },
   backBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1, borderColor: '#e9ecef',
   },
   barcodeBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1, borderColor: '#e9ecef',
   },
-  title: {
-    fontSize: 20, fontWeight: 'bold', color: '#1a1a1a',
-  },
+  title: { fontSize: 18, fontWeight: '700', color: '#111827' },
 
   searchContainer: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#fff',
-    marginHorizontal: 16, marginVertical: 16, paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: 'white',
+    marginHorizontal: 16, marginVertical: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
+    borderWidth: 1, borderColor: '#E5E7EB',
+    gap: 8,
   },
-  searchIcon: { marginRight: 12 },
-  searchInput: { flex: 1, fontSize: 16, color: '#1a1a1a', fontWeight: '500' },
+  searchIcon: {},
+  searchInput: { flex: 1, fontSize: 14, color: '#111827', padding: 0 },
 
   listContent: { paddingHorizontal: 8, paddingBottom: 24 },
   row: { justifyContent: 'space-between', paddingHorizontal: 8 },
   productCard: {
     backgroundColor: 'white', borderRadius: 12, marginBottom: 12,
     width: '48%', overflow: 'hidden', position: 'relative',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
-  productImage: { width: '100%', height: 185, backgroundColor: '#f8f9fa' },
+  productImage: { width: '100%', height: 165, backgroundColor: '#F3F4F6' },
   noImage: { alignItems: 'center', justifyContent: 'center' },
   photoCount: {
     position: 'absolute', top: 8, right: 8,
@@ -370,26 +386,17 @@ const styles = StyleSheet.create({
   },
   photoCountText: { color: 'white', fontSize: 10, fontWeight: '600' },
   productInfo: { padding: 10, flex: 1, justifyContent: 'space-between' },
-  productName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', marginBottom: 4 },
-  productCategory: { fontSize: 12, color: '#6c757d', marginBottom: 6 },
+  productName: { fontSize: 13, fontWeight: '600', color: '#111827', marginBottom: 4 },
+  productCategory: { fontSize: 11, color: '#6B7280', marginBottom: 6 },
   priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' },
-  productPrice: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
+  productPrice: { fontSize: 15, fontWeight: '700', color: '#4F46E5' },
 
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  emptyTitle: {
-    fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16, marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24,
-  },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#111827', marginTop: 16, marginBottom: 8 },
+  emptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 },
 
-  // Pagination
-  paginationWrap: {
-    paddingVertical: 20, alignItems: 'center', gap: 12,
-  },
-  paginationInfo: {
-    fontSize: 12, color: '#6c757d',
-  },
+  paginationWrap: { paddingVertical: 20, alignItems: 'center', gap: 12 },
+  paginationInfo: { fontSize: 12, color: '#6B7280' },
   paginationRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap',
     justifyContent: 'center', paddingHorizontal: 8,
@@ -397,31 +404,22 @@ const styles = StyleSheet.create({
   pageBtn: {
     minWidth: 36, height: 36, borderRadius: 8,
     backgroundColor: 'white',
-    borderWidth: 1, borderColor: '#e9ecef',
+    borderWidth: 1, borderColor: '#E5E7EB',
     alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 10,
   },
   pageBtnActive: {
-    backgroundColor: '#667eea', borderColor: '#667eea',
+    backgroundColor: '#4F46E5', borderColor: '#4F46E5',
   },
-  pageBtnDisabled: {
-    opacity: 0.4,
-  },
-  pageBtnText: {
-    fontSize: 14, fontWeight: '600', color: '#667eea',
-  },
-  pageBtnTextActive: {
-    color: 'white',
-  },
-  pageDots: {
-    fontSize: 16, color: '#adb5bd', paddingHorizontal: 4,
-  },
+  pageBtnDisabled: { opacity: 0.4 },
+  pageBtnText: { fontSize: 14, fontWeight: '600', color: '#4F46E5' },
+  pageBtnTextActive: { color: 'white' },
+  pageDots: { fontSize: 16, color: '#9CA3AF', paddingHorizontal: 4 },
 
-  // Skeleton
   skeletonGrid: {
     flexDirection: 'row', flexWrap: 'wrap',
     justifyContent: 'space-between', paddingHorizontal: 16,
   },
-  skeleton: { backgroundColor: '#e9ecef' },
-  skeletonLine: { backgroundColor: '#e9ecef', borderRadius: 4 },
+  skeleton: { backgroundColor: '#E5E7EB' },
+  skeletonLine: { backgroundColor: '#E5E7EB', borderRadius: 4 },
 });

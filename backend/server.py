@@ -366,6 +366,23 @@ async def get_products_paged(
 
     return {"items": items, "total": total, "page": page, "pages": pages, "limit": limit}
 
+@api_router.get("/products/random", response_model=List[Product])
+async def get_products_random(limit: int = 4):
+    """Случайные товары для секции 'Интересное'."""
+    if limit < 1 or limit > 20:
+        limit = 4
+
+    docs = await db.products.aggregate([
+        {"$sample": {"size": limit}}
+    ]).to_list(limit)
+
+    result = []
+    for p in docs:
+        doc = product_doc_to_model(p)
+        if doc.get('images') and len(doc['images']) > 1:
+            doc['images'] = [doc['images'][0]]
+        result.append(Product(**doc))
+    return result
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
