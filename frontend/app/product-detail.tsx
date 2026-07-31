@@ -12,6 +12,7 @@ import {
   Alert,
   Dimensions,
   Modal,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +42,7 @@ export default function ProductDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const loadProduct = useCallback(async (productId: string) => {
     try {
@@ -74,6 +76,22 @@ export default function ProductDetailScreen() {
     setCurrentImageIndex(index);
   };
 
+  const copyToClipboard = async (text: string) => {
+    if (!text) return;
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // На нативе fallback — текст всё равно выделяемый вручную
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // молча — пользователь всегда может выделить текст руками
+    }
+  };
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -88,7 +106,7 @@ export default function ProductDetailScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Модалка со штрихкодом — рисуется локально, мгновенно */}
+      {/* Модалка со штрихкодом */}
       <Modal
         visible={barcodeModalVisible}
         animationType="fade"
@@ -110,7 +128,24 @@ export default function ProductDetailScreen() {
               <Barcode value={product.barcode || ''} height={130} />
             </View>
 
-            <Text style={styles.modalBarcodeNumber}>{product.barcode}</Text>
+            <Text style={styles.modalBarcodeNumber} selectable>
+              {product.barcode}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.copyBtn}
+              onPress={() => copyToClipboard(product.barcode || '')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy-outline'}
+                size={16}
+                color={copied ? '#059669' : '#4F46E5'}
+              />
+              <Text style={[styles.copyBtnText, copied && { color: '#059669' }]}>
+                {copied ? 'Скопировано' : 'Копировать'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -170,7 +205,7 @@ export default function ProductDetailScreen() {
 
         <View style={styles.content}>
           <View style={styles.headerInfo}>
-            <Text style={styles.productName}>{product.name}</Text>
+            <Text style={styles.productName} selectable>{product.name}</Text>
             <Text style={styles.productPrice}>{product.price.toLocaleString('ru-RU')} ₸</Text>
           </View>
 
@@ -188,21 +223,23 @@ export default function ProductDetailScreen() {
           {(product.barcode || product.article_number) && (
             <View style={styles.section}>
               {product.barcode && (
-                <TouchableOpacity onPress={() => setBarcodeModalVisible(true)} activeOpacity={0.8}>
-                  <View style={styles.barcodeCard}>
-                    <View style={[styles.iconContainer, { backgroundColor: '#DBEAFE' }]}>
-                      <Ionicons name="barcode" size={24} color="#2563EB" />
-                    </View>
-                    <View style={styles.infoContent}>
-                      <Text style={styles.infoLabel}>Штрихкод</Text>
-                      <Text style={styles.infoValue}>{product.barcode}</Text>
-                    </View>
-                    <View style={styles.scanBadge}>
-                      <Ionicons name="scan" size={16} color="#2563EB" />
-                      <Text style={styles.scanBadgeText}>Сканировать</Text>
-                    </View>
+                <View style={styles.barcodeCard}>
+                  <View style={[styles.iconContainer, { backgroundColor: '#DBEAFE' }]}>
+                    <Ionicons name="barcode" size={24} color="#2563EB" />
                   </View>
-                </TouchableOpacity>
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Штрихкод</Text>
+                    <Text style={styles.infoValue} selectable>{product.barcode}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.scanBadge}
+                    onPress={() => setBarcodeModalVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="scan" size={16} color="#2563EB" />
+                    <Text style={styles.scanBadgeText}>Сканировать</Text>
+                  </TouchableOpacity>
+                </View>
               )}
               {product.article_number && (
                 <InfoCard
@@ -221,7 +258,7 @@ export default function ProductDetailScreen() {
                 <Ionicons name="sparkles" size={20} color="#4F46E5" />
                 <Text style={styles.aiTitle}>AI Характеристики</Text>
               </View>
-              <Text style={styles.aiText}>{product.ai_features}</Text>
+              <Text style={styles.aiText} selectable>{product.ai_features}</Text>
             </View>
           )}
         </View>
@@ -239,7 +276,7 @@ const InfoCard = ({
     </View>
     <View style={styles.infoContent}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+      <Text style={styles.infoValue} selectable>{value}</Text>
     </View>
   </View>
 );
@@ -301,7 +338,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 16, fontWeight: '600', color: '#111827' },
   scanBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 6,
+    backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 8,
     borderRadius: 8,
   },
   scanBadgeText: { fontSize: 11, color: '#2563EB', fontWeight: '700' },
@@ -335,10 +372,15 @@ const styles = StyleSheet.create({
     marginBottom: 4, textAlign: 'center', paddingHorizontal: 40,
   },
   modalSubtitle: { fontSize: 13, color: '#6B7280', marginBottom: 20 },
-  barcodeWrap: {
-    width: '100%', marginBottom: 14,
-  },
+  barcodeWrap: { width: '100%', marginBottom: 14 },
   modalBarcodeNumber: {
     fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: 3,
+    marginBottom: 12,
   },
+  copyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: '#EEF2FF', borderRadius: 10,
+  },
+  copyBtnText: { fontSize: 13, fontWeight: '600', color: '#4F46E5' },
 });
