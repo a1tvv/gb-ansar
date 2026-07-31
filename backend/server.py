@@ -442,25 +442,26 @@ async def search_by_photo(request: PhotoSearchRequest):
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
 
-        # Ищем сначала по name, потом добавим по keywords (без дубликатов)
+        # Сначала все совпадения по name — их обычно мало (3-15 штук)
         name_matches = await db.products.find(
             {"name": {"$regex": first_word, "$options": "i"}}
-        ).sort("created_at", -1).to_list(6)
+        ).sort("created_at", -1).to_list(30)
 
         matched_docs = list(name_matches)
         matched_ids = {d["id"] for d in matched_docs}
 
-        # Если по name меньше 6, добираем из keywords
-        if len(matched_docs) < 6:
+        # Если по name меньше 10, добираем из keywords до 10
+        TARGET = 10
+        if len(matched_docs) < TARGET:
             keyword_matches = await db.products.find(
                 {"keywords": {"$regex": first_word, "$options": "i"}}
-            ).sort("created_at", -1).to_list(20)
+            ).sort("created_at", -1).to_list(30)
 
             for doc in keyword_matches:
                 if doc["id"] not in matched_ids:
                     matched_docs.append(doc)
                     matched_ids.add(doc["id"])
-                    if len(matched_docs) >= 6:
+                    if len(matched_docs) >= TARGET:
                         break
 
         if not matched_docs:
