@@ -17,6 +17,8 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import Barcode from './Barcode';
+
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -75,7 +77,7 @@ export default function ProductDetailScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#667eea" />
+        <ActivityIndicator size="large" color="#4F46E5" />
       </View>
     );
   }
@@ -86,10 +88,10 @@ export default function ProductDetailScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Модалка со штрихкодом */}
+      {/* Модалка со штрихкодом — рисуется локально, мгновенно */}
       <Modal
         visible={barcodeModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setBarcodeModalVisible(false)}
       >
@@ -99,15 +101,15 @@ export default function ProductDetailScreen() {
               style={styles.modalClose}
               onPress={() => setBarcodeModalVisible(false)}
             >
-              <Ionicons name="close" size={28} color="#1a1a1a" />
+              <Ionicons name="close" size={26} color="#111827" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>{product.name}</Text>
             <Text style={styles.modalSubtitle}>Поднесите сканер к экрану</Text>
-            <Image
-              source={{ uri: `https://barcodeapi.org/api/auto/${product.barcode}` }}
-              style={styles.modalBarcodeImage}
-              resizeMode="contain"
-            />
+
+            <View style={styles.barcodeWrap}>
+              <Barcode value={product.barcode || ''} height={130} />
+            </View>
+
             <Text style={styles.modalBarcodeNumber}>{product.barcode}</Text>
           </View>
         </View>
@@ -127,7 +129,7 @@ export default function ProductDetailScreen() {
                   <Image
                     key={index}
                     source={{
-                      uri: img && img.startsWith('http') ? img : `data:image/jpeg;base64,${img}`
+                      uri: img && img.startsWith('http') ? img : `data:image/jpeg;base64,${img}`,
                     }}
                     style={styles.productImage}
                     resizeMode="cover"
@@ -150,7 +152,7 @@ export default function ProductDetailScreen() {
             </>
           ) : (
             <View style={[styles.productImage, styles.noImage]}>
-              <Ionicons name="image-outline" size={80} color="#adb5bd" />
+              <Ionicons name="image-outline" size={80} color="#D1D5DB" />
             </View>
           )}
 
@@ -175,10 +177,10 @@ export default function ProductDetailScreen() {
           {(product.category || product.subcategory) && (
             <View style={styles.section}>
               {product.category && (
-                <InfoCard icon="pricetag" label="Категория" value={product.category} color="#667eea" />
+                <InfoCard icon="pricetag" label="Категория" value={product.category} color="#4F46E5" />
               )}
               {product.subcategory && (
-                <InfoCard icon="albums" label="Подкатегория" value={product.subcategory} color="#f093fb" />
+                <InfoCard icon="albums" label="Подкатегория" value={product.subcategory} color="#DB2777" />
               )}
             </View>
           )}
@@ -188,15 +190,15 @@ export default function ProductDetailScreen() {
               {product.barcode && (
                 <TouchableOpacity onPress={() => setBarcodeModalVisible(true)} activeOpacity={0.8}>
                   <View style={styles.barcodeCard}>
-                    <View style={[styles.iconContainer, { backgroundColor: '#4facfe20' }]}>
-                      <Ionicons name="barcode" size={24} color="#4facfe" />
+                    <View style={[styles.iconContainer, { backgroundColor: '#DBEAFE' }]}>
+                      <Ionicons name="barcode" size={24} color="#2563EB" />
                     </View>
                     <View style={styles.infoContent}>
                       <Text style={styles.infoLabel}>Штрихкод</Text>
                       <Text style={styles.infoValue}>{product.barcode}</Text>
                     </View>
                     <View style={styles.scanBadge}>
-                      <Ionicons name="scan" size={16} color="#4facfe" />
+                      <Ionicons name="scan" size={16} color="#2563EB" />
                       <Text style={styles.scanBadgeText}>Сканировать</Text>
                     </View>
                   </View>
@@ -207,7 +209,7 @@ export default function ProductDetailScreen() {
                   icon="document-text"
                   label="Артикул"
                   value={product.article_number}
-                  color="#43e97b"
+                  color="#059669"
                 />
               )}
             </View>
@@ -216,7 +218,7 @@ export default function ProductDetailScreen() {
           {product.ai_features && (
             <View style={styles.aiSection}>
               <View style={styles.aiHeader}>
-                <Ionicons name="sparkles" size={20} color="#667eea" />
+                <Ionicons name="sparkles" size={20} color="#4F46E5" />
                 <Text style={styles.aiTitle}>AI Характеристики</Text>
               </View>
               <Text style={styles.aiText}>{product.ai_features}</Text>
@@ -243,12 +245,12 @@ const InfoCard = ({
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: '#F3F4F6' },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scrollView: { flex: 1 },
   imageContainer: { width: '100%', height: 400, position: 'relative', backgroundColor: '#000' },
   productImage: { width: SCREEN_WIDTH, height: 400 },
-  noImage: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa' },
+  noImage: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
   topGradient: {
     position: 'absolute', left: 0, right: 0, top: 0, height: 100,
   },
@@ -270,73 +272,73 @@ const styles = StyleSheet.create({
     width: 8, height: 8, borderRadius: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.5)',
   },
-  paginationDotActive: {
-    backgroundColor: 'white', width: 24,
-  },
-  content: { padding: 24 },
-  headerInfo: { marginBottom: 28 },
-  productName: { fontSize: 28, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 8 },
-  productPrice: { fontSize: 32, fontWeight: 'bold', color: '#667eea' },
-  section: { gap: 12, marginBottom: 16 },
+  paginationDotActive: { backgroundColor: 'white', width: 24 },
+
+  content: { padding: 20 },
+  headerInfo: { marginBottom: 24 },
+  productName: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 6 },
+  productPrice: { fontSize: 30, fontWeight: '700', color: '#4F46E5' },
+  section: { gap: 10, marginBottom: 14 },
   infoCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', padding: 20, borderRadius: 16,
+    backgroundColor: 'white', padding: 16, borderRadius: 14,
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
   barcodeCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', padding: 20, borderRadius: 16,
-    borderWidth: 2, borderColor: '#4facfe30',
+    backgroundColor: 'white', padding: 16, borderRadius: 14,
+    borderWidth: 1, borderColor: '#BFDBFE',
   },
   iconContainer: {
-    width: 56, height: 56, borderRadius: 28,
-    alignItems: 'center', justifyContent: 'center', marginRight: 16,
+    width: 48, height: 48, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', marginRight: 14,
   },
   infoContent: { flex: 1 },
   infoLabel: {
-    fontSize: 12, color: '#6c757d', marginBottom: 4,
-    textTransform: 'uppercase', fontWeight: '600',
+    fontSize: 11, color: '#6B7280', marginBottom: 3,
+    textTransform: 'uppercase', fontWeight: '600', letterSpacing: 0.3,
   },
-  infoValue: { fontSize: 18, fontWeight: '600', color: '#1a1a1a' },
+  infoValue: { fontSize: 16, fontWeight: '600', color: '#111827' },
   scanBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#4facfe15', paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 10,
+    backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 8,
   },
-  scanBadgeText: { fontSize: 12, color: '#4facfe', fontWeight: '700' },
+  scanBadgeText: { fontSize: 11, color: '#2563EB', fontWeight: '700' },
   aiSection: {
-    backgroundColor: 'white', padding: 20, borderRadius: 16,
-    borderWidth: 2, borderColor: '#667eea20',
+    backgroundColor: 'white', padding: 16, borderRadius: 14,
+    borderWidth: 1, borderColor: '#E0E7FF',
   },
   aiHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10,
   },
-  aiTitle: { fontSize: 16, fontWeight: 'bold', color: '#667eea' },
-  aiText: { fontSize: 14, color: '#495057', lineHeight: 20 },
+  aiTitle: { fontSize: 15, fontWeight: '700', color: '#4F46E5' },
+  aiText: { fontSize: 13, color: '#4B5563', lineHeight: 20 },
 
+  // Модалка штрихкода
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center', alignItems: 'center', padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center', alignItems: 'center', padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white', borderRadius: 24, padding: 32,
+    backgroundColor: 'white', borderRadius: 20, padding: 24,
     width: '100%', alignItems: 'center',
   },
   modalClose: {
-    position: 'absolute', top: 16, right: 16,
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#f8f9fa', alignItems: 'center', justifyContent: 'center',
+    position: 'absolute', top: 12, right: 12,
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
+    zIndex: 10,
   },
   modalTitle: {
-    fontSize: 20, fontWeight: 'bold', color: '#1a1a1a',
-    marginBottom: 4, textAlign: 'center',
+    fontSize: 18, fontWeight: '700', color: '#111827',
+    marginBottom: 4, textAlign: 'center', paddingHorizontal: 40,
   },
-  modalSubtitle: {
-    fontSize: 14, color: '#6c757d', marginBottom: 24,
-  },
-  modalBarcodeImage: {
-    width: '100%', height: 150, marginBottom: 16,
+  modalSubtitle: { fontSize: 13, color: '#6B7280', marginBottom: 20 },
+  barcodeWrap: {
+    width: '100%', marginBottom: 14,
   },
   modalBarcodeNumber: {
-    fontSize: 22, fontWeight: '700', color: '#1a1a1a', letterSpacing: 3,
+    fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: 3,
   },
 });
