@@ -173,7 +173,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Каталог + pending — компактный список */}
+        {/* Каталог */}
         <TouchableOpacity
           style={styles.listRow}
           onPress={() => router.push('/catalog')}
@@ -190,6 +190,7 @@ export default function HomeScreen() {
           <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
         </TouchableOpacity>
 
+        {/* Заявки + статистика */}
         <View style={styles.groupedList}>
           <TouchableOpacity
             style={[styles.groupedRow, styles.groupedDivider]}
@@ -208,7 +209,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.groupedRow}
+            style={[styles.groupedRow, styles.groupedDivider]}
             onPress={() => router.push('/pending-list')}
             activeOpacity={0.7}
             testID="menu-5"
@@ -219,6 +220,22 @@ export default function HomeScreen() {
             <View style={styles.groupedContent}>
               <Text style={styles.groupedTitle}>Заявки на рассмотрение</Text>
               <Text style={styles.groupedHint}>Для админов склада</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.groupedRow}
+            onPress={() => router.push('/search-stats')}
+            activeOpacity={0.7}
+            testID="menu-6"
+          >
+            <View style={[styles.groupedIcon, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="bar-chart-outline" size={18} color="#7C3AED" />
+            </View>
+            <View style={styles.groupedContent}>
+              <Text style={styles.groupedTitle}>Статистика поиска</Text>
+              <Text style={styles.groupedHint}>Чего не хватает в каталоге</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
           </TouchableOpacity>
@@ -378,7 +395,7 @@ const styles = StyleSheet.create({
   listTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
   listHint: { fontSize: 11, color: '#6B7280', marginTop: 1 },
 
-  // Группа pending
+  // Группа
   groupedList: {
     backgroundColor: 'white', borderRadius: 12,
     borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden',

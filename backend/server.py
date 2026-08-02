@@ -11,7 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import aioboto3
 import base64
@@ -88,7 +88,7 @@ class SearchResponse(BaseModel):
     products: List[Product]
     confidence: Optional[str] = None
     ai_analysis: Optional[str] = None
-    recognized_name: Optional[str] = None  # что ИИ распознал (для передачи в форму)
+    recognized_name: Optional[str] = None
 
 
 class PendingProduct(BaseModel):
@@ -115,6 +115,16 @@ class PendingApproveRequest(BaseModel):
     images: List[str] = Field(..., min_length=1, max_length=5)
     barcode: Optional[str] = None
     article_number: Optional[str] = None
+
+
+class SearchLog(BaseModel):
+    """Запись о каждом поиске по фото."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    query: str                  # что распознал ИИ, как есть
+    query_lower: str            # нижний регистр — для группировки
+    found: bool                 # нашлось ли что-то в каталоге
+    results_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ============= Helpers =============
@@ -232,6 +242,25 @@ async def generate_keywords(name: str, first_image: str) -> str:
     return ""
 
 
+async def log_search(query: str, found: bool, results_count: int = 0):
+    """
+    Пишет запись о поиске. Вызывается фоном — не задерживает ответ кассиру.
+    Ошибка записи лога не должна ломать поиск.
+    """
+    try:
+        if not query:
+            return
+        entry = SearchLog(
+            query=query.strip(),
+            query_lower=query.strip().lower(),
+            found=found,
+            results_count=results_count,
+        )
+        await db.search_logs.insert_one(entry.dict())
+    except Exception as e:
+        logger.error(f"log_search failed: {e}")
+
+
 def product_doc_to_model(doc: dict) -> dict:
     if 'image_base64' in doc and 'images' not in doc:
         doc['images'] = [doc['image_base64']] if doc['image_base64'] else []
@@ -254,6 +283,9 @@ async def lifespan(app: FastAPI):
     await db.products.create_index("barcode")
     await db.pending_products.create_index("id")
     await db.pending_products.create_index("created_at")
+    await db.search_logs.create_index("created_at")
+    await db.search_logs.create_index("query_lower")
+    await db.search_logs.create_index("found")
 
     global bot_task, bot_instance
     bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_object)
@@ -366,6 +398,7 @@ async def get_products_paged(
 
     return {"items": items, "total": total, "page": page, "pages": pages, "limit": limit}
 
+
 @api_router.get("/products/random", response_model=List[Product])
 async def get_products_random(limit: int = 4):
     """Случайные товары для секции 'Интересное'."""
@@ -383,6 +416,7 @@ async def get_products_random(limit: int = 4):
             doc['images'] = [doc['images'][0]]
         result.append(Product(**doc))
     return result
+
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
@@ -403,9 +437,8 @@ async def search_by_photo(request: PhotoSearchRequest):
     """
     Один шаг ИИ, без гадания.
     - ИИ говорит одно слово (что на фото)
-    - Ищем в БД по name/keywords
-    - Сортируем: сначала совпадения в name, потом в keywords
-    - Отдаём максимум 6 кандидатов
+    - Ищем в БД по name, потом добираем по keywords
+    - Каждый поиск пишется в search_logs
     """
     try:
         img_base64 = request.image_base64
@@ -432,6 +465,7 @@ async def search_by_photo(request: PhotoSearchRequest):
         logging.info(f"AI recognized: {ai_keyword}")
 
         if not ai_keyword:
+            asyncio.create_task(log_search("(не распознано)", found=False, results_count=0))
             return SearchResponse(
                 products=[],
                 confidence="not_found",
@@ -442,7 +476,7 @@ async def search_by_photo(request: PhotoSearchRequest):
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
         first_word = clean_keyword.split('-')[0].split(' ')[0]
 
-        # Сначала все совпадения по name — их обычно мало (3-15 штук)
+        # Сначала все совпадения по name
         name_matches = await db.products.find(
             {"name": {"$regex": first_word, "$options": "i"}}
         ).sort("created_at", -1).to_list(30)
@@ -450,7 +484,7 @@ async def search_by_photo(request: PhotoSearchRequest):
         matched_docs = list(name_matches)
         matched_ids = {d["id"] for d in matched_docs}
 
-        # Если по name меньше 10, добираем из keywords до 10
+        # Если по name меньше 10, добираем из keywords
         TARGET = 10
         if len(matched_docs) < TARGET:
             keyword_matches = await db.products.find(
@@ -463,6 +497,11 @@ async def search_by_photo(request: PhotoSearchRequest):
                     matched_ids.add(doc["id"])
                     if len(matched_docs) >= TARGET:
                         break
+
+        # Пишем лог фоном — ответ кассиру не задерживается
+        asyncio.create_task(
+            log_search(clean_keyword, found=bool(matched_docs), results_count=len(matched_docs))
+        )
 
         if not matched_docs:
             return SearchResponse(
@@ -523,6 +562,106 @@ async def delete_product(product_id: str):
         await delete_s3_object(img_url)
     await db.products.delete_one({"id": product_id})
     return {"message": "Product deleted successfully"}
+
+
+# ============= Статистика поиска =============
+
+@api_router.get("/search-logs/stats")
+async def get_search_stats(days: int = 7, limit: int = 20):
+    """
+    Сводка по поискам за период.
+    Возвращает: сколько всего искали, сколько нашлось,
+    топ запросов которых НЕТ в каталоге, и топ найденных.
+    """
+    if days < 1 or days > 365:
+        days = 7
+    if limit < 1 or limit > 50:
+        limit = 20
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    period_filter = {"created_at": {"$gte": since}}
+
+    total = await db.search_logs.count_documents(period_filter)
+    found_count = await db.search_logs.count_documents({**period_filter, "found": True})
+    not_found_count = total - found_count
+
+    # Топ запросов, которых нет в каталоге
+    not_found_pipeline = [
+        {"$match": {**period_filter, "found": False}},
+        {"$group": {
+            "_id": "$query_lower",
+            "count": {"$sum": 1},
+            "label": {"$first": "$query"},
+            "last_seen": {"$max": "$created_at"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+    not_found_docs = await db.search_logs.aggregate(not_found_pipeline).to_list(limit)
+    top_not_found = [
+        {
+            "query": d.get("label") or d["_id"],
+            "count": d["count"],
+            "last_seen": d["last_seen"],
+        }
+        for d in not_found_docs
+    ]
+
+    # Топ найденных — что чаще всего ищут вообще
+    found_pipeline = [
+        {"$match": {**period_filter, "found": True}},
+        {"$group": {
+            "_id": "$query_lower",
+            "count": {"$sum": 1},
+            "label": {"$first": "$query"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+    found_docs = await db.search_logs.aggregate(found_pipeline).to_list(limit)
+    top_found = [
+        {"query": d.get("label") or d["_id"], "count": d["count"]}
+        for d in found_docs
+    ]
+
+    return {
+        "days": days,
+        "total_searches": total,
+        "found_count": found_count,
+        "not_found_count": not_found_count,
+        "success_rate": round(found_count / total * 100, 1) if total else 0.0,
+        "top_not_found": top_not_found,
+        "top_found": top_found,
+    }
+
+
+@api_router.get("/search-logs")
+async def get_search_logs(days: int = 7, only_not_found: bool = False, limit: int = 100):
+    """Сырой список последних поисков — для отладки."""
+    if days < 1 or days > 365:
+        days = 7
+    if limit < 1 or limit > 500:
+        limit = 100
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    query = {"created_at": {"$gte": since}}
+    if only_not_found:
+        query["found"] = False
+
+    docs = await db.search_logs.find(query).sort("created_at", -1).limit(limit).to_list(limit)
+    result = []
+    for d in docs:
+        if '_id' in d:
+            del d['_id']
+        result.append(d)
+    return result
+
+
+@api_router.delete("/search-logs")
+async def clear_search_logs():
+    """Очистить всю статистику поиска."""
+    res = await db.search_logs.delete_many({})
+    return {"deleted": res.deleted_count}
 
 
 # ============= Pending =============
@@ -605,9 +744,11 @@ async def reject_pending_product(pending_id: str):
     return {"message": "Pending product rejected and deleted"}
 
 
+# ============= Meta =============
+
 @api_router.get("/")
 async def root():
-    return {"message": "Smart AI Product Catalog API", "version": "2.1.0"}
+    return {"message": "Smart AI Product Catalog API", "version": "2.2.0"}
 
 
 @app.get("/health")
