@@ -7,8 +7,15 @@ import {
   Easing,
   Dimensions,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const { height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+// Размеры логотипа
+const LOGO_BIG = 88;
+const LOGO_SCALE_SMALL = 0.48;
+// Высота шапки, в которую схлопывается сплэш
+const HEADER_H = 170;
 
 interface WelcomeScreenProps {
   onAnimationEnd: () => void;
@@ -16,165 +23,199 @@ interface WelcomeScreenProps {
 
 export default function WelcomeScreen({ onAnimationEnd }: WelcomeScreenProps) {
   // Появление логотипа
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.92)).current;
-  // Шторка снизу вверх: 0 = экран светлый, 1 = тёмный закрыл всё
-  const wipeAnim = useRef(new Animated.Value(0)).current;
-  // Заполнение прогресс-бара
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  const logoIn = useRef(new Animated.Value(0)).current;
+  // Появление/исчезновение подписей
+  const textIn = useRef(new Animated.Value(0)).current;
+  // Схлопывание панели вверх: 0 = весь экран, 1 = шапка
+  const collapse = useRef(new Animated.Value(0)).current;
+  // Финальное растворение всего сплэша
+  const exitFade = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Фаза 1 — логотип проявляется на светлом (400мс)
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
+    Animated.sequence([
+      // 1. Логотип выскакивает
+      Animated.spring(logoIn, {
         toValue: 1,
-        duration: 400,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
+        friction: 7,
+        tension: 60,
+        useNativeDriver: false,
       }),
-      Animated.spring(scaleAnim, {
+      // 2. Подписи проявляются
+      Animated.timing(textIn, {
         toValue: 1,
-        friction: 8,
-        tension: 50,
-        useNativeDriver: true,
+        duration: 260,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: false,
+      }),
+      // 3. Пауза, чтобы прочитали
+      Animated.delay(320),
+      // 4. Подписи гаснут
+      Animated.timing(textIn, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: false,
+      }),
+      // 5. Панель схлопывается вверх, логотип уезжает влево и мельчает
+      Animated.timing(collapse, {
+        toValue: 1,
+        duration: 380,
+        easing: Easing.bezier(0.6, 0, 0.3, 1),
+        useNativeDriver: false,
+      }),
+      // 6. Небольшая задержка и растворение
+      Animated.delay(120),
+      Animated.timing(exitFade, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: false,
       }),
     ]).start(() => {
-      // Фаза 2 — шторка едет снизу + одновременно бежит прогресс
-      Animated.parallel([
-        Animated.sequence([
-          Animated.delay(150),
-          Animated.timing(wipeAnim, {
-            toValue: 1,
-            duration: 450,
-            easing: Easing.bezier(0.65, 0, 0.35, 1),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.timing(progressAnim, {
-          toValue: 1,
-          duration: 1150,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: false,
-        }),
-      ]).start(() => {
-        onAnimationEnd();
-      });
+      onAnimationEnd();
     });
   }, []);
 
-  // Тёмный слой едет снизу вверх
-  const darkLayerY = wipeAnim.interpolate({
+  // Высота фиолетовой панели
+  const panelHeight = collapse.interpolate({
     inputRange: [0, 1],
-    outputRange: [SCREEN_H, 0],
+    outputRange: [SCREEN_H, HEADER_H],
   });
 
-  // Контент внутри тёмного слоя компенсирует сдвиг — визуально остаётся на месте
-  const innerCompensationY = wipeAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-SCREEN_H, 0],
+  // Скругление нижних углов появляется при схлопывании
+  const panelRadius = collapse.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, 8, 26],
   });
 
-  const progressWidth = progressAnim.interpolate({
+  // Логотип: появление
+  const logoScaleIn = logoIn.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
+    outputRange: [0.6, 1],
+  });
+
+  // Логотип: уменьшение при схлопывании
+  const logoScaleOut = collapse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, LOGO_SCALE_SMALL],
+  });
+
+  // Логотип: уезжает к левому краю
+  const logoShiftX = collapse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -(SCREEN_W / 2 - 20 - (LOGO_BIG * LOGO_SCALE_SMALL) / 2)],
   });
 
   return (
-    <View style={styles.root}>
-      {/* ===== СВЕТЛЫЙ СЛОЙ (низ) ===== */}
-      <View style={[styles.layer, styles.lightBg]}>
-        <Animated.View
-          style={[
-            styles.centerBlock,
-            { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
-          ]}
-        >
-          <Text style={[styles.logoText, styles.logoDark]}>Ansar HomeWear</Text>
-          <Text style={[styles.tagline, styles.taglineDark]}>Умный поиск товаров</Text>
-          <View style={[styles.progressTrack, styles.trackLight]}>
-            <Animated.View
-              style={[styles.progressLine, styles.lineDark, { width: progressWidth }]}
-            />
-          </View>
-        </Animated.View>
-      </View>
-
-      {/* ===== ТЁМНЫЙ СЛОЙ (шторка снизу) ===== */}
+    <Animated.View style={[styles.root, { opacity: exitFade }]}>
       <Animated.View
         style={[
-          styles.layer,
-          styles.darkBg,
-          { transform: [{ translateY: darkLayerY }] },
+          styles.panelWrap,
+          {
+            height: panelHeight,
+            borderBottomLeftRadius: panelRadius,
+            borderBottomRightRadius: panelRadius,
+          },
         ]}
       >
-        <Animated.View
-          style={[
-            styles.innerFill,
-            { transform: [{ translateY: innerCompensationY }] },
-          ]}
+        <LinearGradient
+          colors={['#6479E5', '#6B6BCF', '#744AA1']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.gradient}
         >
           <View style={styles.centerBlock}>
-            <Text style={[styles.logoText, styles.logoLight]}>Ansar HomeWear</Text>
-            <Text style={[styles.tagline, styles.taglineLight]}>Умный поиск товаров</Text>
-            <View style={[styles.progressTrack, styles.trackDark]}>
-              <Animated.View
-                style={[styles.progressLine, styles.lineLight, { width: progressWidth }]}
-              />
-            </View>
+            <Animated.View
+              style={[
+                styles.logoBox,
+                {
+                  opacity: logoIn,
+                  transform: [
+                    { translateX: logoShiftX },
+                    { scale: Animated.multiply(logoScaleIn, logoScaleOut) },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.logoLetter}>A</Text>
+            </Animated.View>
+
+            <Animated.View
+              style={[
+                styles.textBlock,
+                {
+                  opacity: textIn,
+                  transform: [
+                    {
+                      translateY: textIn.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [10, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.brandText}>Ansar HomeWear</Text>
+              <Text style={styles.taglineText}>AI КАТАЛОГ</Text>
+            </Animated.View>
           </View>
-        </Animated.View>
+        </LinearGradient>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F3F4F6' },
-
-  layer: {
+  root: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
   },
-  lightBg: { backgroundColor: '#F3F4F6' },
-  darkBg: { backgroundColor: '#0A0A16' },
-
-  // Внутренний контейнер тёмного слоя — компенсирует сдвиг родителя
-  innerFill: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  centerBlock: { alignItems: 'center' },
-
-  logoText: {
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  logoDark: { color: '#111827' },
-  logoLight: { color: '#FFFFFF' },
-
-  tagline: {
-    marginTop: 8,
-    fontSize: 14,
-    letterSpacing: 0.8,
-  },
-  taglineDark: { color: '#6B7280' },
-  taglineLight: { color: 'rgba(255, 255, 255, 0.55)' },
-
-  progressTrack: {
-    marginTop: 28,
-    width: 180,
-    height: 3,
-    borderRadius: 2,
+  panelWrap: {
+    width: '100%',
     overflow: 'hidden',
   },
-  trackLight: { backgroundColor: 'rgba(17, 24, 39, 0.12)' },
-  trackDark: { backgroundColor: 'rgba(255, 255, 255, 0.12)' },
-
-  progressLine: { height: '100%', borderRadius: 2 },
-  lineDark: { backgroundColor: '#4F46E5' },
-  lineLight: { backgroundColor: '#6366F1' },
+  gradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  centerBlock: {
+    alignItems: 'center',
+  },
+  logoBox: {
+    width: LOGO_BIG,
+    height: LOGO_BIG,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  logoLetter: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: '#6D3E9E',
+  },
+  textBlock: {
+    alignItems: 'center',
+    marginTop: 22,
+  },
+  brandText: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  taglineText: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.6)',
+    letterSpacing: 4,
+  },
 });
