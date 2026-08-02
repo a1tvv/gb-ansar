@@ -140,7 +140,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Две крупные квадратные плитки */}
+        {/* Две крупные квадратные плитки с иконкой во всю карточку */}
         <View style={styles.tilesRow}>
           <TouchableOpacity
             style={[styles.bigTile, { backgroundColor: '#4F46E5' }]}
@@ -148,8 +148,9 @@ export default function HomeScreen() {
             activeOpacity={0.85}
             testID="menu-1"
           >
-            <View style={styles.bigTileIconWrap}>
-              <Ionicons name="camera" size={26} color="#fff" />
+            {/* Иконка-подложка во всю плитку */}
+            <View style={styles.tileIconLayer} pointerEvents="none">
+              <Ionicons name="camera" size={150} color="rgba(255,255,255,0.22)" />
             </View>
             <View style={styles.bigTileTextWrap}>
               <Text style={styles.bigTileTitle}>Поиск по фото</Text>
@@ -163,8 +164,8 @@ export default function HomeScreen() {
             activeOpacity={0.85}
             testID="menu-2"
           >
-            <View style={styles.bigTileIconWrap}>
-              <Ionicons name="barcode" size={26} color="#fff" />
+            <View style={styles.tileIconLayer} pointerEvents="none">
+              <Ionicons name="barcode" size={150} color="rgba(255,255,255,0.22)" />
             </View>
             <View style={styles.bigTileTextWrap}>
               <Text style={styles.bigTileTitle}>Сканер кода</Text>
@@ -369,16 +370,30 @@ const styles = StyleSheet.create({
   },
   bigTile: {
     flex: 1, aspectRatio: 1, borderRadius: 16,
-    padding: 14, justifyContent: 'space-between',
+    padding: 14,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+    position: 'relative',
   },
-  bigTileIconWrap: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center',
+  // Слой с гигантской иконкой — заполняет всю плитку
+  tileIconLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bigTileTextWrap: { marginTop: 4 },
-  bigTileTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  bigTileSubtitle: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 2 },
+  bigTileTextWrap: {},
+  bigTileTitle: {
+    color: '#fff', fontSize: 15, fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.25)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  bigTileSubtitle: {
+    color: 'rgba(255,255,255,0.9)', fontSize: 11, marginTop: 2,
+    textShadowColor: 'rgba(0,0,0,0.25)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
 
   // Каталог (одиночная строка)
   listRow: {
