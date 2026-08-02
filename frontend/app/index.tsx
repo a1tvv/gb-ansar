@@ -16,8 +16,6 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import WelcomeScreen from './WelcomeScreen';
-
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface Product {
@@ -27,17 +25,7 @@ interface Product {
   images: string[];
 }
 
-export default function App() {
-  const [isAppReady, setIsAppReady] = useState(false);
-
-  if (!isAppReady) {
-    return <WelcomeScreen onAnimationEnd={() => setIsAppReady(true)} />;
-  }
-
-  return <HomeScreen />;
-}
-
-function HomeScreen() {
+export default function HomeScreen() {
   const router = useRouter();
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
