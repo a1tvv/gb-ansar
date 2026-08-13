@@ -120,9 +120,9 @@ class PendingApproveRequest(BaseModel):
 class SearchLog(BaseModel):
     """Запись о каждом поиске по фото."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    query: str                  # что распознал ИИ, как есть
-    query_lower: str            # нижний регистр — для группировки
-    found: bool                 # нашлось ли что-то в каталоге
+    query: str
+    query_lower: str
+    found: bool
     results_count: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -243,10 +243,7 @@ async def generate_keywords(name: str, first_image: str) -> str:
 
 
 async def log_search(query: str, found: bool, results_count: int = 0):
-    """
-    Пишет запись о поиске. Вызывается фоном — не задерживает ответ кассиру.
-    Ошибка записи лога не должна ломать поиск.
-    """
+    """Пишет запись о поиске. Ошибка лога не должна ломать поиск."""
     try:
         if not query:
             return
@@ -431,18 +428,14 @@ async def search_by_barcode(barcode: str):
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product_doc_to_model(product))
 
+
 @api_router.post("/products/search/photo", response_model=SearchResponse)
 async def search_by_photo(request: PhotoSearchRequest):
     """
     Один шаг ИИ, без гадания.
-<<<<<<< HEAD
-    - ИИ говорит одно слово (что на фото)
-    - Ищем в БД по name, потом добираем по keywords
-=======
     - ИИ называет предмет
     - Ищем по ВСЕМ словам ответа (не только по первому), с обрезкой окончаний
     - Сначала совпадения в названии, потом добираем из keywords
->>>>>>> a57c812 (Дубль 112)
     - Каждый поиск пишется в search_logs
     """
     try:
@@ -480,11 +473,6 @@ async def search_by_photo(request: PhotoSearchRequest):
 
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
 
-<<<<<<< HEAD
-        # Сначала все совпадения по name
-        name_matches = await db.products.find(
-            {"name": {"$regex": first_word, "$options": "i"}}
-=======
         # Ищем по ВСЕМ словам ответа ИИ, не только по первому.
         # Обрезаем окончания у длинных слов — "Горшки" находит "Горшок".
         raw_words = re.split(r'[\s\-,/]+', clean_keyword)
@@ -508,25 +496,16 @@ async def search_by_photo(request: PhotoSearchRequest):
         # Сначала все совпадения по названию
         name_matches = await db.products.find(
             {"$or": name_conditions}
->>>>>>> a57c812 (Дубль 112)
         ).sort("created_at", -1).to_list(30)
 
         matched_docs = list(name_matches)
         matched_ids = {d["id"] for d in matched_docs}
 
-<<<<<<< HEAD
-        # Если по name меньше 10, добираем из keywords
-        TARGET = 10
-        if len(matched_docs) < TARGET:
-            keyword_matches = await db.products.find(
-                {"keywords": {"$regex": first_word, "$options": "i"}}
-=======
         # Добираем из keywords, если по названию мало
         TARGET = 10
         if len(matched_docs) < TARGET:
             keyword_matches = await db.products.find(
                 {"$or": kw_conditions}
->>>>>>> a57c812 (Дубль 112)
             ).sort("created_at", -1).to_list(30)
 
             for doc in keyword_matches:
@@ -536,11 +515,7 @@ async def search_by_photo(request: PhotoSearchRequest):
                     if len(matched_docs) >= TARGET:
                         break
 
-<<<<<<< HEAD
-        # Пишем лог фоном — ответ кассиру не задерживается
-=======
         # Лог пишем фоном — ответ кассиру не задерживается
->>>>>>> a57c812 (Дубль 112)
         asyncio.create_task(
             log_search(clean_keyword, found=bool(matched_docs), results_count=len(matched_docs))
         )
@@ -573,6 +548,7 @@ async def search_by_photo(request: PhotoSearchRequest):
     except Exception as e:
         logging.error(f"Error in photo search: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str):
@@ -626,7 +602,6 @@ async def get_search_stats(days: int = 7, limit: int = 20):
     found_count = await db.search_logs.count_documents({**period_filter, "found": True})
     not_found_count = total - found_count
 
-    # Топ запросов, которых нет в каталоге
     not_found_pipeline = [
         {"$match": {**period_filter, "found": False}},
         {"$group": {
@@ -648,7 +623,6 @@ async def get_search_stats(days: int = 7, limit: int = 20):
         for d in not_found_docs
     ]
 
-    # Топ найденных — что чаще всего ищут вообще
     found_pipeline = [
         {"$match": {**period_filter, "found": True}},
         {"$group": {
@@ -789,7 +763,7 @@ async def reject_pending_product(pending_id: str):
 
 @api_router.get("/")
 async def root():
-    return {"message": "Smart AI Product Catalog API", "version": "2.2.0"}
+    return {"message": "Smart AI Product Catalog API", "version": "2.3.0"}
 
 
 @app.get("/health")
