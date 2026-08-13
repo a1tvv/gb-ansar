@@ -431,13 +431,18 @@ async def search_by_barcode(barcode: str):
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product_doc_to_model(product))
 
-
 @api_router.post("/products/search/photo", response_model=SearchResponse)
 async def search_by_photo(request: PhotoSearchRequest):
     """
     Один шаг ИИ, без гадания.
+<<<<<<< HEAD
     - ИИ говорит одно слово (что на фото)
     - Ищем в БД по name, потом добираем по keywords
+=======
+    - ИИ называет предмет
+    - Ищем по ВСЕМ словам ответа (не только по первому), с обрезкой окончаний
+    - Сначала совпадения в названии, потом добираем из keywords
+>>>>>>> a57c812 (Дубль 112)
     - Каждый поиск пишется в search_logs
     """
     try:
@@ -474,21 +479,54 @@ async def search_by_photo(request: PhotoSearchRequest):
             )
 
         clean_keyword = ai_keyword.strip('."\' \n').split('\n')[0]
-        first_word = clean_keyword.split('-')[0].split(' ')[0]
 
+<<<<<<< HEAD
         # Сначала все совпадения по name
         name_matches = await db.products.find(
             {"name": {"$regex": first_word, "$options": "i"}}
+=======
+        # Ищем по ВСЕМ словам ответа ИИ, не только по первому.
+        # Обрезаем окончания у длинных слов — "Горшки" находит "Горшок".
+        raw_words = re.split(r'[\s\-,/]+', clean_keyword)
+        stems = []
+        for w in raw_words:
+            w = w.strip().lower()
+            if len(w) < 4:
+                continue
+            stem = w if len(w) <= 5 else w[:-2]
+            stems.append(re.escape(stem))
+        if not stems:
+            cleaned = clean_keyword.strip().lower()
+            if cleaned:
+                stems = [re.escape(cleaned)]
+
+        logging.info(f"Search stems: {stems}")
+
+        name_conditions = [{"name": {"$regex": s, "$options": "i"}} for s in stems]
+        kw_conditions = [{"keywords": {"$regex": s, "$options": "i"}} for s in stems]
+
+        # Сначала все совпадения по названию
+        name_matches = await db.products.find(
+            {"$or": name_conditions}
+>>>>>>> a57c812 (Дубль 112)
         ).sort("created_at", -1).to_list(30)
 
         matched_docs = list(name_matches)
         matched_ids = {d["id"] for d in matched_docs}
 
+<<<<<<< HEAD
         # Если по name меньше 10, добираем из keywords
         TARGET = 10
         if len(matched_docs) < TARGET:
             keyword_matches = await db.products.find(
                 {"keywords": {"$regex": first_word, "$options": "i"}}
+=======
+        # Добираем из keywords, если по названию мало
+        TARGET = 10
+        if len(matched_docs) < TARGET:
+            keyword_matches = await db.products.find(
+                {"$or": kw_conditions}
+>>>>>>> a57c812 (Дубль 112)
             ).sort("created_at", -1).to_list(30)
 
             for doc in keyword_matches:
@@ -498,7 +536,11 @@ async def search_by_photo(request: PhotoSearchRequest):
                     if len(matched_docs) >= TARGET:
                         break
 
+<<<<<<< HEAD
         # Пишем лог фоном — ответ кассиру не задерживается
+=======
+        # Лог пишем фоном — ответ кассиру не задерживается
+>>>>>>> a57c812 (Дубль 112)
         asyncio.create_task(
             log_search(clean_keyword, found=bool(matched_docs), results_count=len(matched_docs))
         )
@@ -531,7 +573,6 @@ async def search_by_photo(request: PhotoSearchRequest):
     except Exception as e:
         logging.error(f"Error in photo search: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str):
