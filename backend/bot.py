@@ -17,6 +17,7 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
+from pymongo import ReturnDocument
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,13 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
 
     bot = Bot(token=token)
     dp = Dispatcher()
+
+    async def delete_s3_urls(urls: list[str], error_prefix: str):
+        """Удаляет фото из S3 параллельно; ошибка одного не мешает остальным."""
+        results = await asyncio.gather(*(delete_s3_object(url) for url in urls), return_exceptions=True)
+        for url, res in zip(urls, results):
+            if isinstance(res, Exception):
+                logger.warning(f"{error_prefix} {url}: {res}")
 
     # ============= Управление единственным экраном =============
 
@@ -419,7 +427,8 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
             file = await bot.get_file(photo.file_id)
             file_bytes = await bot.download_file(file.file_path)
             raw = file_bytes.read()
-            compressed = compress_image_bytes(raw)
+            # Pillow держит процессор; в отдельном потоке API в это время не замирает
+            compressed = await asyncio.to_thread(compress_image_bytes, raw)
             b64 = base64.b64encode(compressed).decode("utf-8")
         except Exception as e:
             logger.error(f"Photo download failed: {e}")
@@ -983,13 +992,12 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
     async def save_product(chat_id: int):
         state = user_states[chat_id]
         try:
-            uploaded_urls = []
-            for img in state["images"]:
-                url = await upload_base64_to_s3(img)
-                if url:
-                    uploaded_urls.append(url)
-
-            keywords = await generate_keywords(state["name"], state["images"][0])
+            # Фото грузятся в S3 параллельно, пока ИИ пишет синонимы
+            urls, keywords = await asyncio.gather(
+                asyncio.gather(*(upload_base64_to_s3(img) for img in state["images"])),
+                generate_keywords(state["name"], state["images"][0]),
+            )
+            uploaded_urls = [url for url in urls if url]
 
             product = Product(
                 name=state["name"],
@@ -1024,11 +1032,11 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
             return
         try:
             from datetime import datetime, timezone
-            await db.products.update_one(
+            doc = await db.products.find_one_and_update(
                 {"id": state["managing_id"]},
                 {"$set": {field: value, "updated_at": datetime.now(timezone.utc)}},
+                return_document=ReturnDocument.AFTER,
             )
-            doc = await db.products.find_one({"id": state["managing_id"]})
             state["managing_doc"] = doc
             state["step"] = "manage"
             await show_screen(
@@ -1046,28 +1054,21 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
         if not state or not state.get("managing_id") or not state.get("managing_doc"):
             return
         try:
-            # Заливаем новые
-            new_urls = []
-            for img in state["images"]:
-                url = await upload_base64_to_s3(img)
-                if url:
-                    new_urls.append(url)
+            # Заливаем новые — параллельно
+            urls = await asyncio.gather(*(upload_base64_to_s3(img) for img in state["images"]))
+            new_urls = [url for url in urls if url]
 
             # Удаляем старые из S3 если есть функция
             old_urls = state["managing_doc"].get("images") or []
             if delete_s3_object:
-                for old in old_urls:
-                    try:
-                        await delete_s3_object(old)
-                    except Exception as e:
-                        logger.warning(f"Не удалось удалить старое фото {old}: {e}")
+                await delete_s3_urls(old_urls, "Не удалось удалить старое фото")
 
             from datetime import datetime, timezone
-            await db.products.update_one(
+            doc = await db.products.find_one_and_update(
                 {"id": state["managing_id"]},
                 {"$set": {"images": new_urls, "updated_at": datetime.now(timezone.utc)}},
+                return_document=ReturnDocument.AFTER,
             )
-            doc = await db.products.find_one({"id": state["managing_id"]})
             state["managing_doc"] = doc
             state["images"] = []
             state["step"] = "manage"
@@ -1093,11 +1094,7 @@ def build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_obj
 
             # Чистим S3
             if delete_s3_object:
-                for url in doc.get("images") or []:
-                    try:
-                        await delete_s3_object(url)
-                    except Exception as e:
-                        logger.warning(f"S3 delete failed for {url}: {e}")
+                await delete_s3_urls(doc.get("images") or [], "S3 delete failed for")
 
             await db.products.delete_one({"id": state["managing_id"]})
 

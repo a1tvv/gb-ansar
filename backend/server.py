@@ -2,7 +2,8 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from contextlib import asynccontextmanager
+from pymongo import ReturnDocument
+from contextlib import asynccontextmanager, AsyncExitStack
 import os
 import logging
 import httpx
@@ -18,13 +19,13 @@ import base64
 
 from bot import build_bot, notify_admins
 
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 s3_endpoint = os.environ.get('S3_ENDPOINT_URL')
 s3_bucket = os.environ.get('S3_BUCKET_NAME')
 s3_access_key = os.environ.get('S3_ACCESS_KEY')
 s3_secret_key = os.environ.get('S3_SECRET_KEY')
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'gb-ansar-db')
@@ -35,6 +36,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 PUBLIC_SITE_URL = os.environ.get('PUBLIC_SITE_URL', 'https://gb-ansar.vercel.app')
+
+# Один HTTP- и один S3-клиент на весь процесс: соединения переиспользуются,
+# а не открываются заново на каждый запрос. S3-клиент открывается в lifespan.
+http_client = httpx.AsyncClient(timeout=60.0)
+s3_client = None
+
+# В списках карточке нужно только первое фото — остальные не тянем из базы
+FIRST_IMAGE_ONLY = {"images": {"$slice": 1}}
 
 
 # ============= Models =============
@@ -131,25 +140,24 @@ class SearchLog(BaseModel):
 
 async def call_openrouter(messages: list, retries=3) -> str:
     api_key = os.environ.get('OPENROUTER_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')
-    async with httpx.AsyncClient(timeout=60.0) as http_client:
-        for i in range(retries):
-            response = await http_client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "google/gemini-3.5-flash", "messages": messages}
-            )
-            if response.status_code == 200:
-                return response.json()['choices'][0]['message']['content'].strip()
-            elif response.status_code == 429:
-                await asyncio.sleep(2 ** (i + 1))
-            else:
-                logging.error(f"API Error: {response.status_code} - {response.text}")
-                return ""
+    for i in range(retries):
+        response = await http_client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": "google/gemini-3.5-flash", "messages": messages}
+        )
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content'].strip()
+        elif response.status_code == 429:
+            await asyncio.sleep(2 ** (i + 1))
+        else:
+            logging.error(f"API Error: {response.status_code} - {response.text}")
+            return ""
     return ""
 
 
 async def upload_base64_to_s3(base64_data: str, folder: str = "products") -> str:
-    if not all([s3_endpoint, s3_bucket, s3_access_key, s3_secret_key]):
+    if s3_client is None:
         logger.error("S3 credentials are not fully set!")
         return ""
     try:
@@ -157,20 +165,13 @@ async def upload_base64_to_s3(base64_data: str, folder: str = "products") -> str
             base64_data = base64_data.split(",")[1]
         image_bytes = base64.b64decode(base64_data)
         file_name = f"{folder}/{uuid.uuid4()}.jpg"
-        session = aioboto3.Session()
-        async with session.client(
-            's3',
-            endpoint_url=s3_endpoint,
-            aws_access_key_id=s3_access_key,
-            aws_secret_access_key=s3_secret_key
-        ) as s3:
-            await s3.put_object(
-                Bucket=s3_bucket,
-                Key=file_name,
-                Body=image_bytes,
-                ContentType='image/jpeg',
-                ACL='public-read'
-            )
+        await s3_client.put_object(
+            Bucket=s3_bucket,
+            Key=file_name,
+            Body=image_bytes,
+            ContentType='image/jpeg',
+            ACL='public-read'
+        )
         domain = s3_endpoint.replace("https://", "")
         return f"https://{s3_bucket}.{domain}/{file_name}"
     except Exception as e:
@@ -179,7 +180,7 @@ async def upload_base64_to_s3(base64_data: str, folder: str = "products") -> str
 
 
 async def delete_s3_object(image_url: str) -> bool:
-    if not all([s3_endpoint, s3_bucket, s3_access_key, s3_secret_key]):
+    if s3_client is None:
         return False
     if not image_url:
         return False
@@ -189,30 +190,26 @@ async def delete_s3_object(image_url: str) -> bool:
         if not image_url.startswith(prefix):
             return False
         key = image_url[len(prefix):]
-        session = aioboto3.Session()
-        async with session.client(
-            's3',
-            endpoint_url=s3_endpoint,
-            aws_access_key_id=s3_access_key,
-            aws_secret_access_key=s3_secret_key
-        ) as s3:
-            await s3.delete_object(Bucket=s3_bucket, Key=key)
+        await s3_client.delete_object(Bucket=s3_bucket, Key=key)
         return True
     except Exception as e:
         logger.error(f"Error deleting S3 object: {e}")
         return False
 
 
+async def delete_s3_objects(image_urls: List[str]):
+    await asyncio.gather(*(delete_s3_object(url) for url in image_urls))
+
+
 async def upload_images_to_s3(images: List[str], folder: str = "products") -> List[str]:
-    urls = []
-    for image_data in images:
+    async def upload_one(image_data: str) -> Optional[str]:
         if image_data.startswith("data:image") or len(image_data) > 1000:
-            url = await upload_base64_to_s3(image_data, folder=folder)
-            if url:
-                urls.append(url)
-        else:
-            urls.append(image_data)
-    return urls
+            return await upload_base64_to_s3(image_data, folder=folder) or None
+        return image_data
+
+    # Все фото грузятся параллельно, порядок сохраняется
+    urls = await asyncio.gather(*(upload_one(image_data) for image_data in images))
+    return [url for url in urls if url is not None]
 
 
 async def generate_keywords(name: str, first_image: str) -> str:
@@ -278,25 +275,37 @@ async def lifespan(app: FastAPI):
     await db.products.create_index("id")
     await db.products.create_index("name")
     await db.products.create_index("barcode")
+    await db.products.create_index("created_at")  # все списки сортируются по дате
     await db.pending_products.create_index("id")
     await db.pending_products.create_index("created_at")
     await db.search_logs.create_index("created_at")
     await db.search_logs.create_index("query_lower")
     await db.search_logs.create_index("found")
 
-    global bot_task, bot_instance
-    bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_object)
-    if bot and dp:
-        bot_instance = bot
-        bot_task = asyncio.create_task(dp.start_polling(bot))
-        logging.info("Telegram bot polling started")
-    else:
-        logging.info("Telegram bot NOT started (нет TELEGRAM_BOT_TOKEN)")
+    global bot_task, bot_instance, s3_client
+    async with AsyncExitStack() as stack:
+        if all([s3_endpoint, s3_bucket, s3_access_key, s3_secret_key]):
+            s3_client = await stack.enter_async_context(aioboto3.Session().client(
+                's3',
+                endpoint_url=s3_endpoint,
+                aws_access_key_id=s3_access_key,
+                aws_secret_access_key=s3_secret_key
+            ))
 
-    yield
+        bot, dp = build_bot(db, upload_base64_to_s3, generate_keywords, Product, delete_s3_object)
+        if bot and dp:
+            bot_instance = bot
+            bot_task = asyncio.create_task(dp.start_polling(bot))
+            logging.info("Telegram bot polling started")
+        else:
+            logging.info("Telegram bot NOT started (нет TELEGRAM_BOT_TOKEN)")
 
-    if bot_task:
-        bot_task.cancel()
+        yield
+
+        if bot_task:
+            bot_task.cancel()
+        s3_client = None
+    await http_client.aclose()
     client.close()
 
 
@@ -331,8 +340,11 @@ async def create_category(category: Category):
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate):
     product_dict = product_data.dict()
-    uploaded_urls = await upload_images_to_s3(product_dict.get("images", []))
-    product_dict["keywords"] = await generate_keywords(product_data.name, product_data.images[0])
+    # Фото грузятся в S3, пока ИИ пишет синонимы
+    uploaded_urls, product_dict["keywords"] = await asyncio.gather(
+        upload_images_to_s3(product_dict.get("images", [])),
+        generate_keywords(product_data.name, product_data.images[0]),
+    )
     product_dict["images"] = uploaded_urls
     product = Product(**product_dict)
     await db.products.insert_one(product.dict())
@@ -352,7 +364,7 @@ async def get_products(
     if subcategory:
         query["subcategory"] = subcategory
 
-    products = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    products = await db.products.find(query, FIRST_IMAGE_ONLY).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     result = []
     for p in products:
         doc = product_doc_to_model(p)
@@ -380,11 +392,12 @@ async def get_products_paged(
     if subcategory:
         query["subcategory"] = subcategory
 
-    total = await db.products.count_documents(query)
-    pages = (total + limit - 1) // limit
-
     skip = (page - 1) * limit
-    docs = await db.products.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total, docs = await asyncio.gather(
+        db.products.count_documents(query),
+        db.products.find(query, FIRST_IMAGE_ONLY).sort("created_at", -1).skip(skip).limit(limit).to_list(limit),
+    )
+    pages = (total + limit - 1) // limit
 
     items = []
     for p in docs:
@@ -417,7 +430,8 @@ async def get_products_random(limit: int = 4):
 
 @api_router.get("/products/search/text", response_model=List[Product])
 async def search_by_text(q: str):
-    products = await db.products.find({"name": {"$regex": q, "$options": "i"}}).sort("created_at", -1).to_list(1000)
+    # Ввод экранируется: «(» больше не роняет поиск, а тяжёлый regex не нагружает базу
+    products = await db.products.find({"name": {"$regex": re.escape(q), "$options": "i"}}).sort("created_at", -1).to_list(1000)
     return [Product(**product_doc_to_model(p)) for p in products]
 
 
@@ -560,13 +574,14 @@ async def get_product(product_id: str):
 
 @api_router.put("/products/{product_id}", response_model=Product)
 async def update_product(product_id: str, product_data: ProductUpdate):
-    product = await db.products.find_one({"id": product_id})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
     update_data = {k: v for k, v in product_data.dict().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc)
-    await db.products.update_one({"id": product_id}, {"$set": update_data})
-    updated_product = await db.products.find_one({"id": product_id})
+    # Один запрос вместо трёх: обновить и сразу получить новую версию
+    updated_product = await db.products.find_one_and_update(
+        {"id": product_id}, {"$set": update_data}, return_document=ReturnDocument.AFTER
+    )
+    if not updated_product:
+        raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product_doc_to_model(updated_product))
 
 
@@ -575,8 +590,7 @@ async def delete_product(product_id: str):
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    for img_url in product.get("images", []):
-        await delete_s3_object(img_url)
+    await delete_s3_objects(product.get("images", []))
     await db.products.delete_one({"id": product_id})
     return {"message": "Product deleted successfully"}
 
@@ -598,10 +612,6 @@ async def get_search_stats(days: int = 7, limit: int = 20):
     since = datetime.now(timezone.utc) - timedelta(days=days)
     period_filter = {"created_at": {"$gte": since}}
 
-    total = await db.search_logs.count_documents(period_filter)
-    found_count = await db.search_logs.count_documents({**period_filter, "found": True})
-    not_found_count = total - found_count
-
     not_found_pipeline = [
         {"$match": {**period_filter, "found": False}},
         {"$group": {
@@ -613,16 +623,6 @@ async def get_search_stats(days: int = 7, limit: int = 20):
         {"$sort": {"count": -1}},
         {"$limit": limit},
     ]
-    not_found_docs = await db.search_logs.aggregate(not_found_pipeline).to_list(limit)
-    top_not_found = [
-        {
-            "query": d.get("label") or d["_id"],
-            "count": d["count"],
-            "last_seen": d["last_seen"],
-        }
-        for d in not_found_docs
-    ]
-
     found_pipeline = [
         {"$match": {**period_filter, "found": True}},
         {"$group": {
@@ -633,7 +633,24 @@ async def get_search_stats(days: int = 7, limit: int = 20):
         {"$sort": {"count": -1}},
         {"$limit": limit},
     ]
-    found_docs = await db.search_logs.aggregate(found_pipeline).to_list(limit)
+
+    # Четыре независимых запроса — параллельно, а не по очереди
+    total, found_count, not_found_docs, found_docs = await asyncio.gather(
+        db.search_logs.count_documents(period_filter),
+        db.search_logs.count_documents({**period_filter, "found": True}),
+        db.search_logs.aggregate(not_found_pipeline).to_list(limit),
+        db.search_logs.aggregate(found_pipeline).to_list(limit),
+    )
+    not_found_count = total - found_count
+
+    top_not_found = [
+        {
+            "query": d.get("label") or d["_id"],
+            "count": d["count"],
+            "last_seen": d["last_seen"],
+        }
+        for d in not_found_docs
+    ]
     top_found = [
         {"query": d.get("label") or d["_id"], "count": d["count"]}
         for d in found_docs
@@ -733,16 +750,16 @@ async def approve_pending_product(pending_id: str, data: PendingApproveRequest):
         raise HTTPException(status_code=404, detail="Pending product not found")
 
     product_dict = data.dict()
-    product_dict["images"] = await upload_images_to_s3(product_dict.get("images", []))
-    product_dict["keywords"] = await generate_keywords(data.name, data.images[0])
+    product_dict["images"], product_dict["keywords"] = await asyncio.gather(
+        upload_images_to_s3(product_dict.get("images", [])),
+        generate_keywords(data.name, data.images[0]),
+    )
 
     product = Product(**product_dict)
     await db.products.insert_one(product.dict())
 
     admin_urls = set(product_dict["images"])
-    for old_url in pending.get("images", []):
-        if old_url not in admin_urls:
-            await delete_s3_object(old_url)
+    await delete_s3_objects([url for url in pending.get("images", []) if url not in admin_urls])
 
     await db.pending_products.delete_one({"id": pending_id})
     return product
@@ -753,8 +770,7 @@ async def reject_pending_product(pending_id: str):
     pending = await db.pending_products.find_one({"id": pending_id})
     if not pending:
         raise HTTPException(status_code=404, detail="Pending product not found")
-    for img_url in pending.get("images", []):
-        await delete_s3_object(img_url)
+    await delete_s3_objects(pending.get("images", []))
     await db.pending_products.delete_one({"id": pending_id})
     return {"message": "Pending product rejected and deleted"}
 
